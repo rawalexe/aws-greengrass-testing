@@ -128,11 +128,11 @@ public abstract class UnixCommands implements Commands, UnixPathsMixin {
             throws CommandExecutionException {
 
         List<String> arguments = new ArrayList<>();
-
-        arguments.add("./install-greengrass-lite.sh");
+        
+        arguments.add("/home/ubuntu/repo/testlogs/greengrass/install-greengrass-lite.sh");
 
         execute(CommandInput.builder()
-                .line(JAVA)
+                .line("sh")
                 .addArgs(arguments.toArray(new String[0]))
                 .timeout(TIMEOUT_IN_SECONDS)
                 .build());

@@ -91,40 +91,39 @@ public class DefaultGreengrass implements Greengrass {
     @Override
     public void install() {
         if (!isRegistered()) {
-            platform.files().copyTo(
-                    greengrassContext.greengrassPath(),
-                    testContext.installRoot().resolve("greengrass"));
+            // platform.files().copyTo(
+            //         greengrassContext.greengrassPath(),
+            //         testContext.installRoot().resolve("greengrass"));
 
-            Map<String, String> systemProperties = new HashMap<>();
-            systemProperties.put("root", testContext.installRoot().toString());
-            systemProperties.put("log.store", "FILE");
-            systemProperties.put("log.level", testContext.logLevel());
+            // Map<String, String> systemProperties = new HashMap<>();
+            // systemProperties.put("root", testContext.installRoot().toString());
+            // systemProperties.put("log.store", "FILE");
+            // systemProperties.put("log.level", testContext.logLevel());
 
-            Map<String, String> ggParameters = new HashMap<>();
-            ggParameters.put("--aws-region", getAWSRegion());
-            ggParameters.put("--env-stage", getEnvStage());
-            if (!testContext.currentUser().isEmpty()) {
-                ggParameters.put("--component-default-user", testContext.currentUser());
-            }
-            if (!testContext.trustedPluginsPaths().isEmpty()) {
-                for (String trustedPluginsPath : testContext.trustedPluginsPaths()) {
-                    Path hostPath = Paths.get(trustedPluginsPath);
-                    Path dutPath = testContext.installRoot().resolve(hostPath.getFileName());
-                    try {
-                        platform.files().copyTo(hostPath, dutPath);
-                    } catch (CopyException e) {
-                        LOGGER.error("Caught exception while copying file to DUT");
-                        throw new RuntimeException(e);
-                    }
-                    ggParameters.put("--trusted-plugin", dutPath.toString());
-                }
-            }
+            // Map<String, String> ggParameters = new HashMap<>();
+            // ggParameters.put("--aws-region", getAWSRegion());
+            // ggParameters.put("--env-stage", getEnvStage());
+            // if (!testContext.currentUser().isEmpty()) {
+            //     ggParameters.put("--component-default-user", testContext.currentUser());
+            // }
+            // if (!testContext.trustedPluginsPaths().isEmpty()) {
+            //     for (String trustedPluginsPath : testContext.trustedPluginsPaths()) {
+            //         Path hostPath = Paths.get(trustedPluginsPath);
+            //         Path dutPath = testContext.installRoot().resolve(hostPath.getFileName());
+            //         try {
+            //             platform.files().copyTo(hostPath, dutPath);
+            //         } catch (CopyException e) {
+            //             LOGGER.error("Caught exception while copying file to DUT");
+            //             throw new RuntimeException(e);
+            //         }
+            //         ggParameters.put("--trusted-plugin", dutPath.toString());
+            //     }
+            // }
+            LOGGER.info("I am about to install lite");
             NucleusInstallationParameters nucleusInstallationParameters = NucleusInstallationParameters.builder()
-                    .systemProperties(systemProperties)
-                    .greengrassParameters(ggParameters)
                     .greengrassRootDirectoryPath(testContext.installRoot())
                     .build();
-            platform.commands().installNucleus(nucleusInstallationParameters);
+            platform.commands().installLiteNucleus(nucleusInstallationParameters);
         }
     }
 

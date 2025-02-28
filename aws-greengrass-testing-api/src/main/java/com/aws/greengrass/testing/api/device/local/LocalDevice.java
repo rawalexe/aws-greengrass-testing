@@ -76,7 +76,7 @@ public class LocalDevice implements Device {
         });
         Optional.ofNullable(input.workingDirectory()).map(Path::toFile).ifPresent(builder::directory);
         try {
-            LOGGER.debug("Running process: {}", builder.command());
+            LOGGER.info("Running process: {}", builder.command());
             final Process process = builder.start();
             if (Objects.isNull(input.timeout())) {
                 process.waitFor();

@@ -41,10 +41,13 @@ public abstract class UnixCommands implements Commands, UnixPathsMixin {
     private static final long TIMEOUT_IN_SECONDS = 30L;
 
     /**
-     * Constructs a new Unix based platform support with a device abstraction and pillbox binary.
+     * Constructs a new Unix based platform support with a device abstraction and
+     * pillbox binary.
      *
-     * @param device the underlying {@link Device} abstraction representing this {@link Platform}
-     * @param pillboxContext the {@link PillboxContext} location for the pillbox binary
+     * @param device         the underlying {@link Device} abstraction representing
+     *                       this {@link Platform}
+     * @param pillboxContext the {@link PillboxContext} location for the pillbox
+     *                       binary
      */
     public UnixCommands(final Device device, final PillboxContext pillboxContext) {
         this.host = PlatformOS.currentPlatform();
@@ -103,10 +106,10 @@ public abstract class UnixCommands implements Commands, UnixPathsMixin {
     @Override
     public void kill(List<Integer> processIds) throws CommandExecutionException {
         String output = executeToString(CommandInput.builder()
-            .line("kill -9 " + processIds.stream()
-                    .map(i -> Integer.toString(i))
-                    .collect(Collectors.joining(" ")))
-            .build());
+                .line("kill -9 " + processIds.stream()
+                        .map(i -> Integer.toString(i))
+                        .collect(Collectors.joining(" ")))
+                .build());
         LOGGER.debug("Output of kill command : " + output);
     }
 
@@ -121,13 +124,27 @@ public abstract class UnixCommands implements Commands, UnixPathsMixin {
     }
 
     @Override
+    public void installLiteNucleus(NucleusInstallationParameters installationParameters)
+            throws CommandExecutionException {
+
+        List<String> arguments = new ArrayList<>();
+
+        arguments.add("./install-greengrass-lite.sh");
+
+        execute(CommandInput.builder()
+                .line(JAVA)
+                .addArgs(arguments.toArray(new String[0]))
+                .timeout(TIMEOUT_IN_SECONDS)
+                .build());
+    }
+
+    @Override
     public void installNucleus(NucleusInstallationParameters installationParameters) throws CommandExecutionException {
         List<String> arguments = new ArrayList<>();
 
         if (installationParameters.getJvmArguments() != null) {
             arguments.addAll(installationParameters.getJvmArguments());
         }
-
 
         if (installationParameters.getSystemProperties() != null) {
             installationParameters.getSystemProperties().forEach((k, v) -> {

@@ -20,12 +20,12 @@ public abstract class CleanupContext {
 
     @Value.Default
     public boolean persistInstalledSoftware() {
-        return false;
+        return true;
     }
 
     @Value.Default
     public boolean persistGeneratedFiles() {
-        return false;
+        return true;
     }
 
     public static Builder builder() {

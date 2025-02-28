@@ -1,7 +1,7 @@
 Feature: Testing Cloud component in Greengrass
 
   Background:
-    Given my device is registered as a Thing
+    # Given my device is registered as a Thing
     And my device is running Greengrass
 
   @CloudDeployment @IDT @OTFStable @RawalDebug

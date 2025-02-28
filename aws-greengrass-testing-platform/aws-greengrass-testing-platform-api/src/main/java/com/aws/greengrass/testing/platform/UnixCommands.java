@@ -129,7 +129,7 @@ public abstract class UnixCommands implements Commands, UnixPathsMixin {
 
         List<String> arguments = new ArrayList<>();
         
-        arguments.add("/home/ubuntu/repo/testlogs/greengrass/install-greengrass-lite.sh");
+        arguments.add("/Users/chenjunf/tmo/greengrass/install-greengrass-lite.sh");
 
         execute(CommandInput.builder()
                 .line("sh")

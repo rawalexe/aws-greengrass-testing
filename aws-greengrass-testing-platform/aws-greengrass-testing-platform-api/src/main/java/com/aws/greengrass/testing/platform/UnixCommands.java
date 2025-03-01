@@ -61,8 +61,8 @@ public abstract class UnixCommands implements Commands, UnixPathsMixin {
         Optional.ofNullable(input.args()).ifPresent(args -> args.forEach(joiner::add));
         return device.execute(CommandInput.builder()
                 .workingDirectory(input.workingDirectory())
-                .line("sh")
-                .addArgs("-c", formatToUnixPath(joiner.toString()))
+                .line("sudo")
+                .addArgs("sh", "-c", formatToUnixPath(joiner.toString()))
                 .input(input.input())
                 .timeout(input.timeout())
                 .build());
@@ -129,7 +129,8 @@ public abstract class UnixCommands implements Commands, UnixPathsMixin {
 
         List<String> arguments = new ArrayList<>();
         
-        arguments.add("/Users/chenjunf/tmo/greengrass/install-greengrass-lite.sh");
+        //arguments.add("/home/ubuntu/repo/testlogs/greengrass/install-greengrass-lite.sh -p /home/ubuntu/repo/testlogs/greengrass/aws-greengrass-lite-2.0.2-Linux.deb -k /home/ubuntu/repo/aws-greengrass-testing/aws-greengrass-testing-examples/aws-greengrass-testing-examples-component/GTFLiteTesting-connectionKit.zip");
+        arguments.add("apt install -y /home/ubuntu/repo/testlogs/greengrass/aws-greengrass-lite-2.0.2-Linux.deb");
 
         execute(CommandInput.builder()
                 .line("sh")

@@ -85,7 +85,7 @@ public class LocalDevice implements Device {
             }
             final int exitCode = process.exitValue();
             if (exitCode != 0) {
-                String error = flushStream(process.getErrorStream());
+                String error = flushStream(process.getErrorStream()) + flushStream(process.getInputStream());
                 throw new CommandExecutionException(error, exitCode, input);
             }
             return pump(process.getInputStream());

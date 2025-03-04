@@ -6,11 +6,19 @@
 package com.aws.greengrass.testing.platform.linux;
 
 import com.aws.greengrass.testing.api.device.Device;
+import com.aws.greengrass.testing.api.device.exception.CommandExecutionException;
 import com.aws.greengrass.testing.api.model.PillboxContext;
+import com.aws.greengrass.testing.platform.NucleusLiteInstallationParameters;
 import com.aws.greengrass.testing.platform.UnixCommands;
 
 public class LinuxCommands extends UnixCommands {
     public LinuxCommands(final Device device, final PillboxContext pillboxContext) {
         super(device, pillboxContext);
+    }
+
+    @Override
+    public void installNucleusLite(NucleusLiteInstallationParameters installationParameters)
+            throws CommandExecutionException {
+
     }
 }

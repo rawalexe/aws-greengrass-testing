@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -121,6 +122,24 @@ public abstract class UnixCommands implements Commands, UnixPathsMixin {
     }
 
     @Override
+    public void installNucleusLite(NucleusLiteInstallationParameters installationParameters) throws CommandExecutionException {
+        List<String> arguments = new ArrayList<>();
+        if (installationParameters.getInstallerArgs() != null) {
+            installationParameters.getInstallerArgs().forEach((k, v) -> {
+                StringBuilder sb = new StringBuilder(k);
+                sb.append(k).append(" ").append(v);
+                arguments.add(sb.toString());
+            });
+        }
+        Path installerScript = Paths.get("/path/to/install.sh");
+        execute(CommandInput.builder()
+                .line(installerScript.toString())
+                .addArgs(arguments.toArray(new String[0]))
+                .timeout(TIMEOUT_IN_SECONDS)
+                .build());
+    }
+
+    @Override
     public void installNucleus(NucleusInstallationParameters installationParameters) throws CommandExecutionException {
         List<String> arguments = new ArrayList<>();
 
@@ -156,6 +175,8 @@ public abstract class UnixCommands implements Commands, UnixPathsMixin {
                 .timeout(TIMEOUT_IN_SECONDS)
                 .build());
     }
+
+
 
     @Override
     public int startNucleus(Path rootDirectory) throws CommandExecutionException {

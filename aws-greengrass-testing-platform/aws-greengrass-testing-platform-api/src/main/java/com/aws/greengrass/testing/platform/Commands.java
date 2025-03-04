@@ -33,7 +33,12 @@ public interface Commands {
         sigterm(findDescendants(pid));
     }
 
+
     void installNucleus(NucleusInstallationParameters installationParameters) throws CommandExecutionException;
+
+  void installNucleusLite(NucleusLiteInstallationParameters installationParameters)
+            throws CommandExecutionException;
+
 
     int startNucleus(Path rootDirectory) throws CommandExecutionException;
 

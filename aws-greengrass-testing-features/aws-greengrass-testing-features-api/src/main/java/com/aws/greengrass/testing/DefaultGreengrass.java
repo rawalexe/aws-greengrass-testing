@@ -14,6 +14,8 @@ import com.aws.greengrass.testing.model.GreengrassContext;
 import com.aws.greengrass.testing.model.TestContext;
 import com.aws.greengrass.testing.modules.model.AWSResourcesContext;
 import com.aws.greengrass.testing.platform.NucleusInstallationParameters;
+import com.aws.greengrass.testing.platform.NucleusLiteInstallationParameters;
+import com.aws.greengrass.testing.platform.NucleusLiteInstallationParametersModel;
 import com.aws.greengrass.testing.platform.Platform;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.logging.log4j.LogManager;
@@ -127,6 +129,20 @@ public class DefaultGreengrass implements Greengrass {
             platform.commands().installNucleus(nucleusInstallationParameters);
         }
     }
+
+
+    @Override
+    public void installLite() {
+        Map<String, String> installerArgs = new HashMap<>();
+        installerArgs.put("-p","/path/to/package");
+        installerArgs.put("-k", "/path/to/kit");
+        NucleusLiteInstallationParameters nucleusLiteInstallationParameters =
+                NucleusLiteInstallationParameters.builder()
+                        .installerArgs(installerArgs)
+                        .build();
+        platform.commands().installNucleusLite(nucleusLiteInstallationParameters);
+    }
+
 
     @Override
     public void start() {

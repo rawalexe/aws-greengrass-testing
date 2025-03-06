@@ -23,6 +23,7 @@ public interface Device extends Closeable {
     PlatformOS platform();
 
     byte[] execute(CommandInput input) throws CommandExecutionException;
+    byte[] executeAsRoot(CommandInput input) throws CommandExecutionException;
 
     default String executeToString(CommandInput input) throws CommandExecutionException {
         return new String(execute(input), StandardCharsets.UTF_8);

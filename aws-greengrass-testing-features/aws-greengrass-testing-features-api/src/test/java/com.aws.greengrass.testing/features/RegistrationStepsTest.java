@@ -124,9 +124,9 @@ public class RegistrationStepsTest {
     @Test
     void GIVEN_only_the_config_name_WHEN_register_as_thing_is_invocated_THEN_it_works_as_expected()
             throws IOException, InterruptedException {
-        Mockito.doNothing().when(registrationSteps).registerAsThing(Mockito.any(), Mockito.any());
+        Mockito.doNothing().when(registrationSteps).registerAsThing(Mockito.any(), Mockito.any(), false);
         registrationSteps.registerAsThing(MOCK_CONFIG_NAME);
-        Mockito.verify(registrationSteps, Mockito.times(1)).registerAsThing(Mockito.any(), Mockito.any());
+        Mockito.verify(registrationSteps, Mockito.times(1)).registerAsThing(Mockito.any(), Mockito.any(), false);
     }
 
     @Test
@@ -150,7 +150,7 @@ public class RegistrationStepsTest {
         Mockito.doReturn(mockIotLifecycle).when(resources).lifecycle(IotLifecycle.class);
         Mockito.doReturn(MOCK_IOT_CRED_ENDPOINT).when(mockIotLifecycle).credentialsEndpoint();
         Mockito.doReturn(mockIotLifecycle).when(resources).lifecycle(IotLifecycle.class);
-        registrationSteps.registerAsThing(null, MOCK_THING_GROUP_NAME);
+        registrationSteps.registerAsThing(null, MOCK_THING_GROUP_NAME, false);
         Mockito.verify(registrationSteps, Mockito.times(1)).setupConfigWithConfigFile(Mockito.any(), Mockito.any());
     }
 

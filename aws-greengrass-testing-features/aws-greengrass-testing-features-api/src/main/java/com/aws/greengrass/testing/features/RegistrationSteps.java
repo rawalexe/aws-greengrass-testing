@@ -43,21 +43,19 @@ import software.amazon.awssdk.http.SdkHttpRequest;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import software.amazon.awssdk.utils.IoUtils;
 
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import javax.inject.Inject;
 import javax.inject.Named;
 import javax.net.ssl.KeyManagerFactory;
@@ -71,6 +69,8 @@ public class RegistrationSteps {
     private static final Logger LOGGER = LogManager.getLogger(RegistrationSteps.class);
     private static final String DEFAULT_CONFIG = "/nucleus/configs/basic_config.yaml";
     private static final String DEFAULT_HSM_CONFIG = "/nucleus/configs/basic_hsm_config.yaml";
+    private static final String DEFAULT_LITE_CONFIG = "/nucleus/lite/configs/basic_config.yaml";
+
     private final TestContext testContext;
     private final RegistrationContext registrationContext;
     private final AWSResourcesContext resourcesContext;
@@ -121,7 +121,14 @@ public class RegistrationSteps {
     public void registerAsThing(String configName) throws IOException, InterruptedException {
         // Already registered ... already installed
         if (!testContext.initializationContext().persistInstalledSoftware()) {
-            registerAsThing(configName, testContext.testId().idFor("ggc-group"));
+            registerAsThing(configName, testContext.testId().idFor("ggc-group"),false);
+        }
+    }
+
+    @Given("my device is registered as a lite Thing")
+    public void registerAsLiteThing() throws IOException, InterruptedException {
+        if (!testContext.initializationContext().persistInstalledSoftware()) {
+            registerAsThing(null, testContext.testId().idFor("lite-group"), true);
         }
     }
 
@@ -144,8 +151,7 @@ public class RegistrationSteps {
     }
 
     @VisibleForTesting
-    void registerAsThing(String configName, String thingGroupName) throws IOException, InterruptedException {
-        final String configFile = Optional.ofNullable(configName).orElse(getDefaultConfigName());
+    void registerAsThing(String configName, String thingGroupName, boolean isLite) throws IOException, InterruptedException {
         String tesRoleNameName = testContext.tesRoleName();
         Optional<IamRole> optionalIamRole = Optional.empty();
         if (!tesRoleNameName.isEmpty()) {
@@ -159,7 +165,13 @@ public class RegistrationSteps {
         String csrPath = parameterValues.getString(FeatureParameters.CSR_PATH).orElse("");
         IotThingSpec thingSpec = getThingSpec(csrPath, thingGroupName, optionalIamRole);
         waitForRoleAliasUsable(thingSpec, resources.lifecycle(IotLifecycle.class).credentialsEndpoint());
-        setupConfigWithConfigFile(configFile, thingSpec);
+        if (isLite) {
+            final String configFile = Optional.ofNullable(configName).orElse(DEFAULT_LITE_CONFIG);
+            setupLiteConfigWithConfigFile(configFile, thingSpec);
+        } else {
+            final String configFile = Optional.ofNullable(configName).orElse(getDefaultConfigName());
+            setupConfigWithConfigFile(configFile, thingSpec);
+        }
     }
 
     private void waitForRoleAliasUsable(IotThingSpec thingSpec, String credentialEndpoint)
@@ -220,6 +232,49 @@ public class RegistrationSteps {
                     thingSpec.roleAliasSpec(),
                     IoUtils.toUtf8String(input),
                     new HashMap<>());
+        }
+    }
+
+    @VisibleForTesting
+    void setupLiteConfigWithConfigFile(String configFile, IotThingSpec thingSpec) throws IOException {
+        try (InputStream input = getClass().getResourceAsStream(configFile)) {
+            String config = setupConfigForLite(
+                    thingSpec.resource(),
+                    thingSpec.roleAliasSpec(),
+                    IoUtils.toUtf8String(input),
+                    new HashMap<>());
+
+            Files.write(testContext.testDirectory().resolve("config.yaml"), config.getBytes(StandardCharsets.UTF_8));
+
+            Files.copy(Paths.get("/home/ubuntu/installer/aws-greengrass-lite-2.0.2-Linux.deb"), testContext.testDirectory().resolve("aws-greengrass-lite-2.0.2-Linux.deb"), StandardCopyOption.REPLACE_EXISTING);
+
+
+            final FileOutputStream fos = new FileOutputStream(String.valueOf(testContext.testDirectory().resolve(testContext.coreThingName() + "-connectionKit.zip")));
+            ZipOutputStream zipOut = new ZipOutputStream(fos);
+            final List<Path> srcFiles = new ArrayList<>();
+            srcFiles.add(testContext.testDirectory().resolve("config.yaml"));
+            srcFiles.add(testContext.testDirectory().resolve("device.pem.crt"));
+            srcFiles.add(testContext.testDirectory().resolve("private.pem.key"));
+            srcFiles.add(testContext.testDirectory().resolve("AmazonRootCA1.pem"));
+
+
+            for (Path srcFile : srcFiles) {
+                File fileToZip = new File(srcFile.toString());
+                FileInputStream fis = new FileInputStream(fileToZip);
+                ZipEntry zipEntry = new ZipEntry(fileToZip.getName());
+                zipOut.putNextEntry(zipEntry);
+
+                byte[] bytes = new byte[1024];
+                int length;
+                while((length = fis.read(bytes)) >= 0) {
+                    zipOut.write(bytes, 0, length);
+                }
+                fis.close();
+                Files.delete(srcFile);
+            }
+
+            zipOut.close();
+            fos.close();
         }
     }
 
@@ -339,6 +394,66 @@ public class RegistrationSteps {
         // Copy to where the nucleus will read it
         platform.files().makeDirectories(testContext.installRoot().getParent());
         platform.files().copyTo(testContext.testDirectory(), testContext.installRoot());
+    }
+
+
+    String setupConfigForLite(
+            IotThing thing,
+            IotRoleAliasSpec roleAliasSpec,
+            String config,
+            Map<String, String> additionalUpdatableFields) throws IOException {
+        IotLifecycle iot = resources.lifecycle(IotLifecycle.class);
+        if (Objects.nonNull(thing)) {
+            config = config.replace("{test_path}", testContext.testDirectory().toString());
+            config = config.replace("{thing_name}", thing.thingName());
+            config = config.replace("{iot_data_endpoint}", iot.dataEndpoint());
+            config = config.replace("{iot_cred_endpoint}", iot.credentialsEndpoint());
+            if (!testContext.hsmConfigured()) {
+                Files.write(testContext.testDirectory().resolve("private.pem.key"), thing.certificate().keyPair()
+                        .privateKey().getBytes(StandardCharsets.UTF_8));
+                Files.write(testContext.testDirectory().resolve("device.pem.crt"), thing.certificate()
+                        .certificatePem().getBytes(StandardCharsets.UTF_8));
+            }
+        } else {
+            additionalUpdatableFields.putIfAbsent("{thing_name}", "null");
+            additionalUpdatableFields.putIfAbsent("{iot_data_endpoint}", "null");
+            additionalUpdatableFields.putIfAbsent("{iot_cred_endpoint}", "null");
+        }
+        System.out.println(roleAliasSpec.resource().roleAlias());
+        config = config.replace("{role_alias}", "GreengrassV2TokenExchangeCoreDeviceRoleAlias");
+//        if (roleAliasSpec != null) {
+//            config = config.replace("{role_alias}", roleAliasSpec.resource().roleAlias());
+//        } else {
+//            additionalUpdatableFields.putIfAbsent("{role_alias}", "null");
+//        }
+
+        if (testContext.hsmConfigured()) {
+            config = config.replace("{ggc_hsm_slotLabel}", parameterValues.getString(HsmParameters.SLOT_LABEL)
+                    .get());
+            String pkcsLibPath = parameterValues.getString(HsmParameters.PKCS_LIBRARY_PATH).get();
+            config = config.replace("{ggc_hsm_pkcs11ProviderPath}", pkcsLibPath);
+            config = config.replace("{ggc_hsm_slotId}", parameterValues.getString(HsmParameters.SLOT_ID).get());
+            config = config.replace("{ggc_hsm_slotUserPin}",
+                    parameterValues.getString(HsmParameters.SLOT_USER_PIN).get());
+            config = config.replace("{ggc.hsm.certandkey.label}", parameterValues
+                    .getString(HsmParameters.HSM_CERT_AND_KEY_LABEL).orElse("greengrass-core"));
+        }
+
+        config = config.replace("{proxy_url}",
+                resourcesContext.proxyConfig().map(ProxyConfig::proxyUrl).orElse(""));
+        config = config.replace("{aws_region}", resourcesContext.region().metadata().id());
+        config = config.replace("{nucleus_version}", testContext.coreVersion());
+        config = config.replace("{env_stage}", resourcesContext.envStage());
+        config = config.replace("{posix_user}", testContext.currentUser());
+        config = config.replace("{data_plane_port}", Integer.toString(registrationContext.connectionPort()));
+        if (parameterValues.get(ROOT_CA_PATH).isPresent()) {
+            byte[] customRootCa = Files.readAllBytes(Paths.get(parameterValues.getString(ROOT_CA_PATH).get()));
+            Files.write(testContext.testDirectory().resolve("AmazonRootCA1.pem"), customRootCa);
+        } else {
+            Files.write(testContext.testDirectory().resolve("AmazonRootCA1.pem"),
+                    registrationContext.rootCA().getBytes(StandardCharsets.UTF_8));
+        }
+        return config;
     }
 
 }

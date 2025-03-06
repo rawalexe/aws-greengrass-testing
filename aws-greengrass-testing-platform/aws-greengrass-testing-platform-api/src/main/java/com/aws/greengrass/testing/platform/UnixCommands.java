@@ -56,6 +56,7 @@ public abstract class UnixCommands implements Commands, UnixPathsMixin {
     public byte[] execute(CommandInput input) throws CommandExecutionException {
         final StringJoiner joiner = new StringJoiner(" ").add(input.line());
         Optional.ofNullable(input.args()).ifPresent(args -> args.forEach(joiner::add));
+        System.out.println(input.workingDirectory());
         return device.execute(CommandInput.builder()
                 .workingDirectory(input.workingDirectory())
                 .line("sh")
@@ -65,12 +66,38 @@ public abstract class UnixCommands implements Commands, UnixPathsMixin {
                 .build());
     }
 
+    @Override
+    public byte[] executeAsRoot(CommandInput input) throws CommandExecutionException {
+        final StringJoiner joiner = new StringJoiner(" ").add(input.line());
+        Optional.ofNullable(input.args()).ifPresent(args -> args.forEach(joiner::add));
+        return device.executeAsRoot(CommandInput.builder()
+                .workingDirectory(input.workingDirectory())
+                .line("sudo")
+                .addArgs("sh","-c", formatToUnixPath(joiner.toString()))
+                .input(input.input())
+                .timeout(input.timeout())
+                .build());
+    }
+
+
     private int executeInBackground(CommandInput input) throws CommandExecutionException {
         String output = "output.log";
         if (Objects.nonNull(input.workingDirectory())) {
             output = input.workingDirectory().resolve(output).toString();
         }
         byte[] rawBytes = execute(CommandInput.builder()
+                .from(input)
+                .addArgs("1> " + output + " 2>&1 & echo $!")
+                .build());
+        return Integer.parseInt(new String(rawBytes, StandardCharsets.UTF_8).trim());
+    }
+
+    public int executeInBackgroundAsRoot(CommandInput input) throws CommandExecutionException {
+        String output = "output.log";
+        if (Objects.nonNull(input.workingDirectory())) {
+            output = input.workingDirectory().resolve(output).toString();
+        }
+        byte[] rawBytes = executeAsRoot(CommandInput.builder()
                 .from(input)
                 .addArgs("1> " + output + " 2>&1 & echo $!")
                 .build());
@@ -120,6 +147,7 @@ public abstract class UnixCommands implements Commands, UnixPathsMixin {
         LOGGER.debug("Output of kill command : " + output);
     }
 
+
     @Override
     public void installNucleus(NucleusInstallationParameters installationParameters) throws CommandExecutionException {
         List<String> arguments = new ArrayList<>();
@@ -156,6 +184,8 @@ public abstract class UnixCommands implements Commands, UnixPathsMixin {
                 .timeout(TIMEOUT_IN_SECONDS)
                 .build());
     }
+
+
 
     @Override
     public int startNucleus(Path rootDirectory) throws CommandExecutionException {

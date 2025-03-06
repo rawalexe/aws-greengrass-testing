@@ -14,13 +14,17 @@ import com.aws.greengrass.testing.model.GreengrassContext;
 import com.aws.greengrass.testing.model.TestContext;
 import com.aws.greengrass.testing.modules.model.AWSResourcesContext;
 import com.aws.greengrass.testing.platform.NucleusInstallationParameters;
+import com.aws.greengrass.testing.platform.NucleusLiteInstallationParameters;
 import com.aws.greengrass.testing.platform.Platform;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -126,6 +130,27 @@ public class DefaultGreengrass implements Greengrass {
                     .build();
             platform.commands().installNucleus(nucleusInstallationParameters);
         }
+    }
+
+
+    @Override
+    public void installLite()   {
+        Map<String, String> installerArgs = new HashMap<>();
+        installerArgs.put("-p","aws-greengrass-lite-2.0.2-Linux.deb");
+//        installerArgs.put("-k", "GTFTestingDevice-connectionKit.zip");
+        NucleusLiteInstallationParameters nucleusLiteInstallationParameters =
+                NucleusLiteInstallationParameters.builder()
+                        .greengrassRootDirectoryPath(testContext.testDirectory())
+                        .installerArgs(installerArgs)
+                        .build();
+        try {
+            Files.copy(Paths.get("/home/ubuntu/installer/install-greengrass-lite.sh"), testContext.testDirectory().resolve("install-greengrass-lite.sh"), StandardCopyOption.REPLACE_EXISTING);
+            Files.copy(Paths.get("/home/ubuntu/installer/aws-greengrass-lite-2.0.2-Linux.deb"), testContext.testDirectory().resolve("aws-greengrass-lite-2.0.2-Linux.deb"), StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+
+        }
+
+        platform.commands().installNucleusLite(nucleusLiteInstallationParameters);
     }
 
     @Override

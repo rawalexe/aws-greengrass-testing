@@ -29,6 +29,8 @@ public class FeatureParameters implements Parameters {
     public static final String CSR_PATH = "csr.path";
     public static final String EXISTING_DEVICE_CERTIFICATE_ARN = "existing.device.cert.arn";
     public static final String GG_CLI_VERSION = "gg.cli.version";
+    public static final String NUCLEUS_LITE_ARCHIVE_PATH = "gglite.archive";
+    public static final String NUCLEUS_LITE_VERSION = "gglite.version";
 
     @Override
     public List<Parameter> available() {
@@ -64,7 +66,8 @@ public class FeatureParameters implements Parameters {
                         + "the trusted plugins that need to added to greengrass. To provide the path on the DUT "
                         + "itself, prefix the path with 'dut:'"),
                 Parameter.of(EXISTING_DEVICE_CERTIFICATE_ARN, "The arn of an already created certificate that"
-                        + "you want to use as device certificate for greengrass.")
+                        + "you want to use as device certificate for greengrass."),
+                Parameter.of(NUCLEUS_LITE_ARCHIVE_PATH, "The nucleus lite binary archive ")
         );
     }
 }

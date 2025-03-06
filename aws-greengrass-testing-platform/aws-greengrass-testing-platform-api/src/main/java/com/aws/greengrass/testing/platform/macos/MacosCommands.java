@@ -9,6 +9,7 @@ import com.aws.greengrass.testing.api.device.Device;
 import com.aws.greengrass.testing.api.device.exception.CommandExecutionException;
 import com.aws.greengrass.testing.api.device.model.CommandInput;
 import com.aws.greengrass.testing.api.model.PillboxContext;
+import com.aws.greengrass.testing.platform.NucleusLiteInstallationParameters;
 import com.aws.greengrass.testing.platform.UnixCommands;
 import com.google.common.annotations.VisibleForTesting;
 
@@ -57,5 +58,9 @@ public class MacosCommands extends UnixCommands {
             }
         }
         return child;
+    }
+
+    @Override
+    public void installNucleusLite(NucleusLiteInstallationParameters installationParameters) throws CommandExecutionException {
     }
 }

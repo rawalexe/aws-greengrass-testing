@@ -10,6 +10,8 @@ import com.aws.greengrass.testing.api.device.exception.CommandExecutionException
 import com.aws.greengrass.testing.api.device.model.CommandInput;
 import com.aws.greengrass.testing.platform.Commands;
 import com.aws.greengrass.testing.platform.NucleusInstallationParameters;
+import com.aws.greengrass.testing.platform.NucleusLiteInstallationParameters;
+import com.aws.greengrass.testing.platform.NucleusLiteInstallationParametersModel;
 
 import java.nio.file.Path;
 import java.util.ArrayDeque;
@@ -47,6 +49,18 @@ public class WindowsCommands implements Commands {
                 .timeout(input.timeout())
                 .build());
     }
+    @Override
+    public byte[] executeAsRoot(CommandInput input) throws CommandExecutionException {
+        final StringJoiner joiner = new StringJoiner(" ").add(input.line());
+        Optional.ofNullable(input.args()).ifPresent(args -> args.forEach(joiner::add));
+        return device.execute(CommandInput.builder()
+                .line("cmd.exe /c")
+                .addArgs(joiner.toString())
+                .input(input.input())
+                .timeout(input.timeout())
+                .build());
+    }
+
 
     @Override
     public List<Integer> findDescendants(int pid) throws CommandExecutionException {
@@ -88,6 +102,7 @@ public class WindowsCommands implements Commands {
                 .collect(Collectors.joining(" /PID "))).build());
     }
 
+
     @Override
     public void installNucleus(NucleusInstallationParameters installationParameters) throws CommandExecutionException {
         List<String> arguments = new ArrayList<>();
@@ -126,6 +141,13 @@ public class WindowsCommands implements Commands {
                 .timeout(TIMEOUT_IN_SECONDS)
                 .build());
     }
+
+    @Override
+    public void installNucleusLite(NucleusLiteInstallationParameters installationParameters)
+            throws CommandExecutionException {
+
+    }
+
 
     @Override
     public int startNucleus(Path rootDirectory) throws CommandExecutionException {

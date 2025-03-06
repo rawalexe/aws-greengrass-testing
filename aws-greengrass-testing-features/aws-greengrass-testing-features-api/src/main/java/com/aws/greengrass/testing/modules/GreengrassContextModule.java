@@ -41,6 +41,7 @@ import javax.inject.Named;
 public class GreengrassContextModule extends AbstractModule {
     private static final Logger LOGGER = LogManager.getLogger(GreengrassContextModule.class);
     static String DEFAULT_NUCLEUS_VERSION;
+    static String DEFAULT_NUCLEUS_LITE_VERSION="1.0.2";
     private static final String GREENGRASS_RECIPE_FILE_LOCATION = "conf/recipe.yaml";
     private static final String COMPONENT_VERSION_KEY = "ComponentVersion";
     private static final String TARGET_DIRECTORY = "greengrass";
@@ -99,6 +100,15 @@ public class GreengrassContextModule extends AbstractModule {
             } else {
                 tempDirectory = Files.createTempDirectory("gg-testing-");
             }
+            if (parameterValues.getString(FeatureParameters.NUCLEUS_LITE_ARCHIVE_PATH).isPresent()) {
+                Optional<String> nucleusLiteVersion = parameterValues.getString(FeatureParameters.NUCLEUS_LITE_VERSION);
+                return GreengrassContext.builder()
+                        .version(nucleusLiteVersion.orElse(DEFAULT_NUCLEUS_LITE_VERSION))
+                        .tempDirectory(tempDirectory)
+                        .cleanupContext(cleanupContext)
+                        .build();
+            }
+
             if (!initializationContext.persistInstalledSoftware()) {
                 final Path archivePath = parameterValues.getString(FeatureParameters.NUCLEUS_ARCHIVE_PATH)
                         .map(Paths::get)

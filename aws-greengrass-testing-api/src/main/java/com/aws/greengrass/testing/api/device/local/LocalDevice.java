@@ -76,7 +76,7 @@ public class LocalDevice implements Device {
         });
         Optional.ofNullable(input.workingDirectory()).map(Path::toFile).ifPresent(builder::directory);
         try {
-            LOGGER.debug("Running process: {}", builder.command());
+            LOGGER.info("Running process: {}", builder.command());
             final Process process = builder.start();
             if (Objects.isNull(input.timeout())) {
                 process.waitFor();
@@ -86,6 +86,37 @@ public class LocalDevice implements Device {
             final int exitCode = process.exitValue();
             if (exitCode != 0) {
                 String error = flushStream(process.getErrorStream());
+                throw new CommandExecutionException(error, exitCode, input);
+            }
+            return pump(process.getInputStream());
+        } catch (IOException | InterruptedException ie) {
+            throw new CommandExecutionException(ie, input);
+        }
+    }
+
+    public byte[] executeAsRoot(CommandInput input) throws CommandExecutionException {
+        // Temporary fix for running UATs on Windows locally
+        String windowsExecuteCommand = String.format("%s %s", WINDOWS_CMD, WINDOWS_CMD_SLASH_C);
+        final ProcessBuilder builder = new ProcessBuilder(input.line());
+        if ((windowsExecuteCommand).equals(input.line())) {
+            builder.command(WINDOWS_CMD);
+            builder.command().add(WINDOWS_CMD_SLASH_C);
+        }
+        Optional.ofNullable(input.args()).ifPresent(args -> {
+            args.forEach(builder.command()::add);
+        });
+        Optional.ofNullable(input.workingDirectory()).map(Path::toFile).ifPresent(builder::directory);
+        try {
+            LOGGER.info("Running process: {}", builder.command());
+            final Process process = builder.start();
+            if (Objects.isNull(input.timeout())) {
+                process.waitFor();
+            } else {
+                process.waitFor(multiplier.multiply(input.timeout()), TimeUnit.SECONDS);
+            }
+            final int exitCode = process.exitValue();
+            if (exitCode != 0) {
+                String error = flushStream(process.getInputStream()) + flushStream(process.getErrorStream());
                 throw new CommandExecutionException(error, exitCode, input);
             }
             return pump(process.getInputStream());

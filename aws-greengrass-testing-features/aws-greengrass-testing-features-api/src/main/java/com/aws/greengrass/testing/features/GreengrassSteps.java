@@ -36,6 +36,11 @@ public class GreengrassSteps implements Closeable {
         files.checkFileExists("logs/greengrass.log");
     }
 
+    @When("I install Greengrass Lite")
+    public void installLite() {
+        greengrass.installLite();
+    }
+
     /**
      * Starts a {@link Greengrass} software instance.
      *

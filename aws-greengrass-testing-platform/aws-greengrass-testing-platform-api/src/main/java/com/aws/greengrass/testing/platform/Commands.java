@@ -14,6 +14,7 @@ import java.util.List;
 
 public interface Commands {
     byte[] execute(CommandInput input) throws CommandExecutionException;
+    byte[] executeAsRoot(CommandInput input) throws CommandExecutionException;
 
     default String executeToString(CommandInput input) throws CommandExecutionException {
         return new String(execute(input), StandardCharsets.UTF_8);
@@ -34,6 +35,9 @@ public interface Commands {
     }
 
     void installNucleus(NucleusInstallationParameters installationParameters) throws CommandExecutionException;
+
+  void installNucleusLite(NucleusLiteInstallationParameters installationParameters)
+            throws CommandExecutionException;
 
     int startNucleus(Path rootDirectory) throws CommandExecutionException;
 

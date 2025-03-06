@@ -14,6 +14,7 @@ import java.util.List;
 
 @AutoService(Parameters.class)
 public class FeatureParameters implements Parameters {
+    //static final String RUNTIME_MODE = "runtime.mode";
     static final String DEVICE_MODE = "device.mode";
     static final String NUCLEUS_VERSION = "ggc.version";
     static final String NUCLEUS_ARCHIVE_PATH = "ggc.archive";
@@ -29,10 +30,13 @@ public class FeatureParameters implements Parameters {
     public static final String CSR_PATH = "csr.path";
     public static final String EXISTING_DEVICE_CERTIFICATE_ARN = "existing.device.cert.arn";
     public static final String GG_CLI_VERSION = "gg.cli.version";
+    public static final String NUCLEUS_LITE_ARCHIVE_PATH = "gglite.archive";
+    public static final String NUCLEUS_LITE_VERSION = "gglite.version";
 
     @Override
     public List<Parameter> available() {
         return Arrays.asList(
+                //Parameter.of(RUNTIME_MODE, "The greengrass core software runtime. Either classic or lite."),
                 Parameter.of(DEVICE_MODE, "The target device under test. Defaults to local device."),
                 Parameter.of(NUCLEUS_VERSION, "Overrides the version of the running Greengrass "
                         + "Nucleus component. Defaults to the value found in " + NUCLEUS_ARCHIVE_PATH),
@@ -64,7 +68,8 @@ public class FeatureParameters implements Parameters {
                         + "the trusted plugins that need to added to greengrass. To provide the path on the DUT "
                         + "itself, prefix the path with 'dut:'"),
                 Parameter.of(EXISTING_DEVICE_CERTIFICATE_ARN, "The arn of an already created certificate that"
-                        + "you want to use as device certificate for greengrass.")
+                        + "you want to use as device certificate for greengrass."),
+                Parameter.of(NUCLEUS_LITE_ARCHIVE_PATH, "The nucleus lite binary archive ")
         );
     }
 }

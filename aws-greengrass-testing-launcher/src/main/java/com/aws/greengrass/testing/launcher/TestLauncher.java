@@ -63,7 +63,7 @@ public final class TestLauncher {
                     .negatable(parameter.flag())
                     .type(parameter.flag() ? Boolean.class : String.class)
                     .description(parameter.description())
-                    .required(parameter.required())
+                    .required(false)
                     .paramLabel(parameter.name())
                     .defaultValue("") // Needed to trigger the pre-processor
                     .preprocessor((stack, commandSpec12, argSpec, map) -> {

@@ -18,6 +18,9 @@ import com.google.inject.AbstractModule;
 import com.google.inject.Module;
 import com.google.inject.Provides;
 import com.google.inject.Singleton;
+
+import io.cucumber.core.gherkin.vintage.internal.gherkin.ast.Feature;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import software.amazon.awssdk.utils.IoUtils;
@@ -42,6 +45,7 @@ public class GreengrassContextModule extends AbstractModule {
     private static final Logger LOGGER = LogManager.getLogger(GreengrassContextModule.class);
     static String DEFAULT_NUCLEUS_VERSION;
     private static final String GREENGRASS_RECIPE_FILE_LOCATION = "conf/recipe.yaml";
+    static String DEFAULT_NUCLEUS_LITE_VERSION="2.0.2";
     private static final String COMPONENT_VERSION_KEY = "ComponentVersion";
     private static final String TARGET_DIRECTORY = "greengrass";
 
@@ -93,19 +97,31 @@ public class GreengrassContextModule extends AbstractModule {
             Path tempDirectory;
             Optional<String> tempDirectoryName = parameterValues.getString(FeatureParameters.TEST_TEMP_PATH);
             Optional<String> nucleusVersion = parameterValues.getString(FeatureParameters.NUCLEUS_VERSION);
+            //Optional<String> runtimeOpt = parameterValues.getString(FeatureParameters.RUNTIME_MODE);
+
             if (tempDirectoryName.isPresent()) {
                 tempDirectory = Paths.get(tempDirectoryName.get());
                 Files.createDirectories(tempDirectory);
             } else {
                 tempDirectory = Files.createTempDirectory("gg-testing-");
             }
+            if (parameterValues.getString(FeatureParameters.NUCLEUS_LITE_ARCHIVE_PATH).isPresent()) {
+                Optional<String> nucleusLiteVersion = parameterValues.getString(FeatureParameters.NUCLEUS_LITE_VERSION);
+                return GreengrassContext.builder()
+                        .version(nucleusLiteVersion.orElse(DEFAULT_NUCLEUS_LITE_VERSION))
+                        .tempDirectory(tempDirectory)
+                        .cleanupContext(cleanupContext)
+                        .build();
+            }
             if (!initializationContext.persistInstalledSoftware()) {
-                final Path archivePath = parameterValues.getString(FeatureParameters.NUCLEUS_ARCHIVE_PATH)
-                        .map(Paths::get)
-                        .orElseThrow(() -> new IllegalArgumentException("Parameter "
-                                + FeatureParameters.NUCLEUS_ARCHIVE_PATH + " is required if not testing against "
-                                + "pre-installed versions of Greengrass on the device."));
-                extractZip(mapper, archivePath, tempDirectory.resolve(TARGET_DIRECTORY));
+                //if (runtimeOpt.isPresent() && "classic".equals(runtimeOpt.get())) {
+                    final Path archivePath = parameterValues.getString(FeatureParameters.NUCLEUS_ARCHIVE_PATH)
+                            .map(Paths::get)
+                            .orElseThrow(() -> new IllegalArgumentException("Parameter "
+                                    + FeatureParameters.NUCLEUS_ARCHIVE_PATH + " is required if not testing against "
+                                    + "pre-installed versions of Greengrass on the device."));
+                    extractZip(mapper, archivePath, tempDirectory.resolve(TARGET_DIRECTORY));
+                //}
 
                 if (!nucleusVersion.isPresent()) {
                     File nucleusRecipeFile = tempDirectory.resolve(TARGET_DIRECTORY)

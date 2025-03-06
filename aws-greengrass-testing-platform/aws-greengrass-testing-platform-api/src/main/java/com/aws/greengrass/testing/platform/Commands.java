@@ -36,7 +36,7 @@ public interface Commands {
 
     void installNucleus(NucleusInstallationParameters installationParameters) throws CommandExecutionException;
 
-  void installNucleusLite(NucleusLiteInstallationParameters installationParameters)
+    void installNucleusLite(NucleusLiteInstallationParameters installationParameters)
             throws CommandExecutionException;
 
 
@@ -44,5 +44,9 @@ public interface Commands {
 
     void startGreengrassService() throws CommandExecutionException;
 
+    void startGreengrassLiteService() throws CommandExecutionException;
+
     void stopGreengrassService() throws CommandExecutionException;
+
+    void stopGreengrassLiteService() throws CommandExecutionException;
 }

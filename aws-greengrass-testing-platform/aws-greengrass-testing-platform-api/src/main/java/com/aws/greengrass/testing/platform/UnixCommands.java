@@ -131,7 +131,7 @@ public abstract class UnixCommands implements Commands, UnixPathsMixin {
                 arguments.add(sb.toString());
             });
         }
-        Path installerScript = Paths.get("/path/to/install.sh");
+        Path installerScript = Paths.get("/home/ubuntu/GTF/installer/install-greengrass-lite.sh");
         execute(CommandInput.builder()
                 .line(installerScript.toString())
                 .addArgs(arguments.toArray(new String[0]))

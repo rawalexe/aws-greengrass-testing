@@ -1,0 +1,14 @@
+---
+system:
+  certificateFilePath: {{config_dir}}/device.pem.crt
+  privateKeyPath: {{config_dir}}/private.pem.key
+  rootCaPath: {{config_dir}}/AmazonRootCA1.pem
+  thingName: {thing_name}
+services:
+  aws.greengrass.NucleusLite:
+    componentType: "NUCLEUS"
+    configuration:
+      awsRegion: "us-east-1"
+      iotRoleAlias:  {role_alias}
+      iotDataEndpoint: {iot_data_endpoint}
+      iotCredEndpoint: {iot_cred_endpoint}

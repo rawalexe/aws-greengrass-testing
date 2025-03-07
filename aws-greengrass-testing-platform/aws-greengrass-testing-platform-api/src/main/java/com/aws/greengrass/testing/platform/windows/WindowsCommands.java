@@ -137,6 +137,9 @@ public class WindowsCommands implements Commands {
 
     }
 
+    @Override
+    public void startGreengrassLiteTarget() throws CommandExecutionException {}
+
 
     @Override
     public int startNucleus(Path rootDirectory) throws CommandExecutionException {

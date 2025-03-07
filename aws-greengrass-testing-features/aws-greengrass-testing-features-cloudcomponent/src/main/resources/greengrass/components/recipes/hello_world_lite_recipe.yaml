@@ -1,0 +1,20 @@
+#
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+
+---
+RecipeFormatVersion: '2020-01-25'
+ComponentName: com.aws.HelloWorldLite
+ComponentVersion: '1.0.0'
+ComponentDescription: Hello World Lite Component.
+ComponentPublisher: Amazon
+ComponentConfiguration:
+  DefaultConfiguration:
+    Message: World
+Manifests:
+- Platform:
+    os: linux
+    runtime: "aws_nucleus_lite"
+  Lifecycle:
+    run: 'echo Hello "{configuration:/Message}"!'

@@ -65,4 +65,7 @@ public class MacosCommands extends UnixCommands {
             throws CommandExecutionException {
 
     }
+
+    @Override
+    public void startGreengrassLiteTarget() throws CommandExecutionException {}
 }

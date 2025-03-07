@@ -48,5 +48,11 @@ public interface Commands {
 
     void stopGreengrassService() throws CommandExecutionException;
 
+<<<<<<< Updated upstream
     void stopGreengrassLiteService() throws CommandExecutionException;
+=======
+    void startGreengrassLiteTarget() throws CommandExecutionException;
+
+    //void stopGreengrassLiteTarget() throws CommandExecutionException;
+>>>>>>> Stashed changes
 }

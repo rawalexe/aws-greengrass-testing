@@ -224,6 +224,52 @@ public class RegistrationSteps {
     }
 
     @VisibleForTesting
+<<<<<<< Updated upstream
+=======
+    void setupLiteConfigWithConfigFile(String configFile, IotThingSpec thingSpec) throws IOException {
+        try (InputStream input = getClass().getResourceAsStream(configFile)) {
+            String config = setupConfigForLite(
+                    thingSpec.resource(),
+                    thingSpec.roleAliasSpec(),
+                    IoUtils.toUtf8String(input),
+                    new HashMap<>());
+
+            Files.write(testContext.testDirectory().resolve("config.yaml"), config.getBytes(StandardCharsets.UTF_8));
+
+            Files.copy(Paths.get("/home/ubuntu/GTF/installer/aws-greengrass-lite-2.0.2-Linux.deb"), testContext.testDirectory().resolve("aws-greengrass-lite-2.0.2-Linux.deb"), StandardCopyOption.REPLACE_EXISTING);
+
+
+            final FileOutputStream fos = new FileOutputStream(String.valueOf(testContext.testDirectory().resolve(testContext.coreThingName() + "-connectionKit.zip")));
+            ZipOutputStream zipOut = new ZipOutputStream(fos);
+            final List<Path> srcFiles = new ArrayList<>();
+            srcFiles.add(testContext.testDirectory().resolve("config.yaml"));
+            srcFiles.add(testContext.testDirectory().resolve("device.pem.crt"));
+            srcFiles.add(testContext.testDirectory().resolve("private.pem.key"));
+            srcFiles.add(testContext.testDirectory().resolve("AmazonRootCA1.pem"));
+
+
+            for (Path srcFile : srcFiles) {
+                File fileToZip = new File(srcFile.toString());
+                FileInputStream fis = new FileInputStream(fileToZip);
+                ZipEntry zipEntry = new ZipEntry(fileToZip.getName());
+                zipOut.putNextEntry(zipEntry);
+
+                byte[] bytes = new byte[1024];
+                int length;
+                while((length = fis.read(bytes)) >= 0) {
+                    zipOut.write(bytes, 0, length);
+                }
+                fis.close();
+                Files.delete(srcFile);
+            }
+
+            zipOut.close();
+            fos.close();
+        }
+    }
+
+    @VisibleForTesting
+>>>>>>> Stashed changes
     IotThingSpec getThingSpec(String csrPath, String thingGroupName,
                               Optional<IamRole> optionalIamRole) throws IOException {
         // TODO: move this into iot steps.

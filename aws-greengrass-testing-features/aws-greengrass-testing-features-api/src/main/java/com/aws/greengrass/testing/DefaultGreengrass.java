@@ -143,8 +143,28 @@ public class DefaultGreengrass implements Greengrass {
                         .greengrassRootDirectoryPath(testContext.installRoot())
                         .installerArgs(installerArgs)
                         .build();
+<<<<<<< Updated upstream
         platform.commands().installNucleusLite(nucleusLiteInstallationParameters);
         platform.commands().startGreengrassLiteService();
+=======
+        try {
+            Files.copy(Paths.get("/home/ubuntu/GTF/installer/install-greengrass-lite.sh"), testContext.testDirectory().resolve("install-greengrass-lite.sh"), StandardCopyOption.REPLACE_EXISTING);
+            Files.copy(Paths.get("/home/ubuntu/GTF/installer/aws-greengrass-lite-2.0.2-Linux.deb"), testContext.testDirectory().resolve("aws-greengrass-lite-2.0.2-Linux.deb"), StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+
+        }
+
+        platform.commands().installNucleusLite(nucleusLiteInstallationParameters);
+        
+        // try {
+        //     Thread.sleep(10000);
+        // } catch (InterruptedException e) {
+        //     LOGGER.warn("Sleep interrupted", e);
+        //     Thread.currentThread().interrupt();
+        // }
+        // LOGGER.info("Starting GreengrassLite...");
+        // platform.commands().startGreengrassLiteTarget();
+>>>>>>> Stashed changes
     }
 
 

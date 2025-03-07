@@ -27,6 +27,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import javax.inject.Inject;
@@ -153,6 +154,17 @@ public class FileSteps {
         containsTimeout(componentPath, line, value, unit);
         if (testContext.initializationContext().persistInstalledSoftware()) {
             logFiles.add(testContext.installRoot().resolve(componentPath));
+        }
+    }
+    @Then("the {word} systemd log on the device contains the line {string} within {int} {word}")
+    public void systemdLogContains(String component, String line, int value, String unit) throws InterruptedException {
+        JournalctlReader reader = new JournalctlReader();
+        TimeUnit timeUnit = TimeUnit.valueOf(unit.toUpperCase());
+        boolean found = waits.untilTrue(() ->
+                     reader.readServiceLogs("ggl." + component + "-" + testContext.testId().id() + ".service").stream().anyMatch(l -> l.contains(line))
+                    ,value, timeUnit);
+        if (!found) {
+            throw new IllegalStateException();
         }
     }
 

@@ -114,11 +114,7 @@ public class DeploymentSteps {
     public void createDeployment(List<List<String>> componentNames) {
         IotThing thing = getIotThing();
         final Map<String, ComponentDeploymentSpecification> components =
-                new HashMap<String, ComponentDeploymentSpecification>() {{
-                    put("aws.greengrass.Nucleus", ComponentDeploymentSpecification.builder()
-                            .componentVersion(testContext.coreVersion())
-                            .build());
-                }};
+                new HashMap<String, ComponentDeploymentSpecification>();
         LOGGER.debug("Potential overrides: {}", overrides);
         components.putAll(parseComponentNamesAndPrepare(componentNames));
         LOGGER.debug("Creating deployment configuration with components to {}: {}",
@@ -360,7 +356,7 @@ public class DeploymentSteps {
                 });
             }
 
-            components.put(name, builder.build());
+            components.put(name + "-" + testContext.testId().id(), builder.build());
 
         });
         return components;

@@ -39,14 +39,21 @@ public class LinuxCommands extends UnixCommands {
                 .timeout(30L)
                 .build());
         try {
-            Thread.sleep(3000);
+            Thread.sleep(60_000);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
         executeAsRoot(CommandInput.builder()
                 .line("")
-                .addArgs("sudo","systemctl","start", "greengrass-lite.target")
+                .addArgs("systemctl","restart", "greengrass-lite.target")
                 .timeout(30L)
+                .build());
+    }
+
+    @Override
+    public void stopGreengrassService() throws CommandExecutionException {
+        executeAsRoot(CommandInput.builder()
+                .line("systemctl stop greengrass-lite.target")
                 .build());
     }
 }

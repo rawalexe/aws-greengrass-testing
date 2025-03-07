@@ -128,7 +128,7 @@ public class RegistrationSteps {
     @Given("my device is registered as a lite Thing")
     public void registerAsLiteThing() throws IOException, InterruptedException {
         if (!testContext.initializationContext().persistInstalledSoftware()) {
-            registerAsThing(null, testContext.testId().idFor("lite-group"), true);
+            registerAsThing(null, testContext.testId().idFor("ggc-group"), true);
         }
     }
 
@@ -420,12 +420,12 @@ public class RegistrationSteps {
             additionalUpdatableFields.putIfAbsent("{iot_cred_endpoint}", "null");
         }
         System.out.println(roleAliasSpec.resource().roleAlias());
-        config = config.replace("{role_alias}", "GreengrassV2TokenExchangeCoreDeviceRoleAlias");
-//        if (roleAliasSpec != null) {
-//            config = config.replace("{role_alias}", roleAliasSpec.resource().roleAlias());
-//        } else {
-//            additionalUpdatableFields.putIfAbsent("{role_alias}", "null");
-//        }
+//        config = config.replace("{role_alias}", "GreengrassV2TokenExchangeCoreDeviceRoleAlias");
+        if (roleAliasSpec != null) {
+            config = config.replace("{role_alias}", roleAliasSpec.resource().roleAlias());
+        } else {
+            additionalUpdatableFields.putIfAbsent("{role_alias}", "null");
+        }
 
         if (testContext.hsmConfigured()) {
             config = config.replace("{ggc_hsm_slotLabel}", parameterValues.getString(HsmParameters.SLOT_LABEL)

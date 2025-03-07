@@ -145,8 +145,8 @@ public class RecipeComponentPreparationService extends PreparationServiceUtils i
 
             Map<String, Object> recipe = mapper.readValue(loader.load(overrideNameVersion.version().value()),
                     new TypeReference<Map<String, Object>>() {});
-            recipe.compute(COMPONENT_VERSION, (key, originalValue) -> {
-                return originalValue + "-" + testContext.testId().id();
+            recipe.compute("ComponentName",(k,ov)->{
+                return ov + "-" + testContext.testId().id();
             });
 
             Map<String, Object> dependencies = (Map<String, Object>) recipe.get(COMPONENT_DEPENDENCIES);

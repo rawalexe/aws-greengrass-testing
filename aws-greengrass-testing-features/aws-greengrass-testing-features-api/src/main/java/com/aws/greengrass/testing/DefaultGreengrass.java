@@ -137,12 +137,14 @@ public class DefaultGreengrass implements Greengrass {
     public void installLite()   {
         Map<String, String> installerArgs = new HashMap<>();
         installerArgs.put("-p","aws-greengrass-lite-2.0.2-Linux.deb");
-//        installerArgs.put("-k", "GTFTestingDevice-connectionKit.zip");
         NucleusLiteInstallationParameters nucleusLiteInstallationParameters =
                 NucleusLiteInstallationParameters.builder()
                         .greengrassRootDirectoryPath(testContext.testDirectory())
                         .installerArgs(installerArgs)
                         .build();
+        // TODO: Download directly from https://github.com/aws-greengrass/aws-greengrass-lite/releases/latest/download/aws-greengrass-lite-ubuntu-x86-64.zip
+        // TODO: Download install-greengrass-lite.sh from Github
+
         try {
             Files.copy(Paths.get("/home/ubuntu/installer/install-greengrass-lite.sh"), testContext.testDirectory().resolve("install-greengrass-lite.sh"), StandardCopyOption.REPLACE_EXISTING);
             Files.copy(Paths.get("/home/ubuntu/installer/aws-greengrass-lite-2.0.2-Linux.deb"), testContext.testDirectory().resolve("aws-greengrass-lite-2.0.2-Linux.deb"), StandardCopyOption.REPLACE_EXISTING);

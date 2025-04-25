@@ -11,6 +11,7 @@ import pytest
 S3_ARTIFACT_DIR = "artifacts"
 GG_TEST_REGION = "us-west-2"
 
+
 class GGTestUtils:
     def __init__(self, account, bucket, region):
         self._region = region
@@ -107,7 +108,9 @@ class GGTestUtils:
                     for entry in result["statistics"]:
                         for thing in entry:
                             for deployment in entry[thing]:
-                                if str(deployment["deploymentId"]) == str(deployment_id):
+                                if str(deployment["deploymentId"]) == str(
+                                    deployment_id
+                                ):
                                     if (
                                         str(deployment["coreDeviceExecutionStatus"])
                                         == "SUCCEEDED"
@@ -343,7 +346,11 @@ class GGTestUtils:
 def gg_util_obj(pytestconfig):
     # Setup an instance of the GGUtils class. It is then passed to the
     # test functions.
-    gg_util = GGTestUtils(pytestconfig.getoption("ggTestAccount"), pytestconfig.getoption("ggTestBucket"), pytestconfig.getoption("ggTestRegion"))
+    gg_util = GGTestUtils(
+        pytestconfig.getoption("ggTestAccount"),
+        pytestconfig.getoption("ggTestBucket"),
+        pytestconfig.getoption("ggTestRegion"),
+    )
 
     # yield the instance of the class to the tests.
     yield gg_util
@@ -425,7 +432,7 @@ def test_Component_16_T1(gg_util_obj):
     )
 
 
-# GC developer can create a component with recipes containing s3 artifact. GGC operator can deploy it and artifact can be run.
+# As a component developer, I expect kernel to fail the deployment if the checksum of downloaded artifacts does not match with the checksum in the recipe.
 def test_Component_27_T1(gg_util_obj):
     # Given I upload component "HelloWorld" version "1.0.0" from the local store
     # And I ensure component "HelloWorld" version "1.0.0" exists on cloud within 120 seconds
@@ -452,9 +459,9 @@ def test_Component_27_T1(gg_util_obj):
 
     # Greengrass retries 10 times with a 1 minute interval
     # Then the deployment completes with FAILED within 630 seconds
-    assert gg_util_obj.wait_for_deployment_till_timeout(60, deployment_id) == "FAILED"
+    assert gg_util_obj.wait_for_deployment_till_timeout(630, deployment_id) == "FAILED"
 
-    # the greengrass log eventually contains the line "com.aws.greengrass.componentmanager.exceptions.ArtifactChecksumMismatchException" within 30 seconds
+    # the greengrass log eventually contains the line "Failed to verify digest." within 30 seconds
     assert (
         gg_util_obj.monitor_journalctl_for_message(
             "ggl.core.ggdeploymentd.service",

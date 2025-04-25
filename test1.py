@@ -11,17 +11,79 @@ import pytest
 S3_ARTIFACT_DIR = "artifacts"
 
 
-class GGTestUtils:
+class SystemInterface:
+    def __init__(self):
+        pass
 
-    def __init__(self, account, bucket, region):
+    def monitor_journalctl_for_message(self, service_name, message, timeout):
+        try:
+            cmd = [
+                "sudo",
+                "journalctl",
+                "-xeau",
+                service_name,
+                "-f",  # Follow mode - shows new entries as they are added
+            ]
+
+            # Run the command and stream output
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+
+            print(f"Monitoring logs for {service_name}...")
+            timeout = time.time() + timeout
+
+            while True:
+                # Check timeout
+                if time.time() > timeout:
+                    print(f"Timeout after {timeout} seconds")
+                    process.terminate()
+                    return False
+
+                output = process.stdout.readline()
+                if output:
+                    print(output.strip())
+                    if message in output.strip():
+                        print(f"Found log")
+                        return True
+
+                # Check if process has terminated
+                if process.poll() is not None:
+                    print("journalctl process killed.")
+                    return False
+
+                time.sleep(0.01)
+
+        except KeyboardInterrupt:
+            print("\nStopping monitor...")
+            process.terminate()
+            return False
+        except Exception as e:
+            print(f"Error: {e}")
+            return False
+        finally:
+            # Ensure process is terminated
+            try:
+                process.terminate()
+            except:
+                pass
+
+
+class GGTestUtils:
+    def __init__(self, account, bucket, region, thing_group):
         self._region = region
         self._account = account
         self._bucket = bucket
+        self._thing_group = thing_group
         self._ggClient = boto3.client("greengrassv2", region_name=self._region)
         self._iotClient = boto3.client("iot", region_name=self._region)
         self._s3Client = boto3.client("s3", region_name=self._region)
         self._ggComponentToDeleteArn = []
         self._ggS3ObjToDelete = []
+        self._ggServiceList = []
 
     def _get_things_in_thing_group(self, thing_group_name):
         """
@@ -103,6 +165,9 @@ class GGTestUtils:
                 }
             },
         )
+
+        if result is not None:
+            self._ggServiceList.append(component_name)
 
         return result
 
@@ -266,6 +331,10 @@ class GGTestUtils:
         self._ggComponentToDeleteArn = []
         self._ggS3ObjToDelete = []
 
+        for service in self._ggServiceList:
+            print(f"ggl.{service}.service")
+        self._ggServiceList = []
+
     def get_ggcore_device_status(self, timeout, thing_group_name):
         things_in_group = self._iotClient.list_things_in_thing_group(
             thingGroupName=thing_group_name,
@@ -289,64 +358,6 @@ class GGTestUtils:
 
         return None
 
-    def monitor_journalctl_for_message(self, service_name, message, timeout):
-        try:
-            cmd = [
-                "sudo",
-                "journalctl",
-                "-xeau",
-                service_name,
-                "-f",  # Follow mode - shows new entries as they are added
-            ]
-
-            # Run the command and stream output
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True,
-            )
-
-            print(f"Monitoring logs for {service_name}...")
-            start_time = time.time()
-
-            while True:
-                print(time.time())
-                print(start_time)
-                # Check timeout
-                if time.time() - start_time > timeout:
-                    print(f"Timeout after {timeout} seconds")
-                    process.terminate()
-                    return False
-
-                output = process.stdout.readline()
-                if output:
-                    print(output.strip())
-                    if message in output.strip():
-                        print(f"Found log")
-                        return True
-
-                # Check if process has terminated
-                if process.poll() is not None:
-                    print("journalctl process killed.")
-                    return False
-
-                time.sleep(0.01)
-
-        except KeyboardInterrupt:
-            print("\nStopping monitor...")
-            process.terminate()
-            return False
-        except Exception as e:
-            print(f"Error: {e}")
-            return False
-        finally:
-            # Ensure process is terminated
-            try:
-                process.terminate()
-            except:
-                pass
-
 
 @pytest.fixture(scope="function")  # Runs for each test function
 def gg_util_obj(pytestconfig):
@@ -356,6 +367,7 @@ def gg_util_obj(pytestconfig):
         pytestconfig.getoption("ggTestAccount"),
         pytestconfig.getoption("ggTestBucket"),
         pytestconfig.getoption("ggTestRegion"),
+        pytestconfig.getoption("ggTestThingGroup"),
     )
 
     # yield the instance of the class to the tests.
@@ -367,8 +379,19 @@ def gg_util_obj(pytestconfig):
     gg_util.cleanup()
 
 
+@pytest.fixture(scope="function")  # Runs for each test function
+def system_interface(pytestconfig):
+    interface = SystemInterface()
+
+    # yield the instance of the class to the tests.
+    yield interface
+
+    # This section is called AFTER the test is run.
+    pass
+
+
 # As a component developer, I can create Greengrass component that works on my current platform.
-def test_Component_12_T1(gg_util_obj):
+def test_Component_12_T1(gg_util_obj, system_interface):
     # I upload component "MultiPlatform" version "1.0.0" from the local store
     component_cloud_name = gg_util_obj.upload_component_with_version(
         "MultiPlatform", "1.0.0")
@@ -377,7 +400,7 @@ def test_Component_12_T1(gg_util_obj):
     #   | MultiPlatform | 1.0.0 |
     # And   I deploy the deployment configuration
     deployment_id = gg_util_obj.create_deployment(
-        f"arn:aws:iot:{gg_util_obj._region}:{gg_util_obj._account}:thinggroup/rawalexe-deployment-test",
+        f"arn:aws:iot:{gg_util_obj._region}:{gg_util_obj._account}:thinggroup/{gg_util_obj._thing_group}",
         component_cloud_name,
         "1.0.0",
     )["deploymentId"]
@@ -390,14 +413,16 @@ def test_Component_12_T1(gg_util_obj):
     """ GG LITE CLI DOESN"T SUPPORT THIS YET. """
 
     # And  the MultiPlatform log eventually contains the line "Hello world!" within 20 seconds
-    assert (gg_util_obj.monitor_journalctl_for_message(
-        "ggl." + component_cloud_name + ".service",
-        "Hello world! World",
-        timeout=20) == True)
+    assert (
+        system_interface.monitor_journalctl_for_message(
+            "ggl." + component_cloud_name + ".service", "Hello world! World", timeout=20
+        )
+        == True
+    )
 
 
 # GC developer can create a component with recipes containing s3 artifact. GGC operator can deploy it and artifact can be run.
-def test_Component_16_T1(gg_util_obj):
+def test_Component_16_T1(gg_util_obj, system_interface):
     # I upload component "HelloWorld" version "1.0.0" from the local store
     component_cloud_name = gg_util_obj.upload_component_with_version(
         "HelloWorld", "1.0.0")
@@ -409,7 +434,7 @@ def test_Component_16_T1(gg_util_obj):
     #        | HelloWorld | 1.0.0 |
     # And I deploy the deployment configuration
     deployment_id = gg_util_obj.create_deployment(
-        f"arn:aws:iot:{gg_util_obj._region}:{gg_util_obj._account}:thinggroup/rawalexe-deployment-test",
+        f"arn:aws:iot:{gg_util_obj._region}:{gg_util_obj._account}:thinggroup/{gg_util_obj._thing_group}",
         component_cloud_name,
         "1.0.0",
     )["deploymentId"]
@@ -422,15 +447,18 @@ def test_Component_16_T1(gg_util_obj):
     """ GG LITE CLI DOESN"T SUPPORT THIS YET. """
 
     # Then the HelloWorld log contains the line "Evergreen's dev experience is great!"
-    assert (gg_util_obj.monitor_journalctl_for_message(
-        "ggl." + component_cloud_name + ".service",
-        "Evergreen's dev experience is great!",
-        timeout=20,
-    ) == True)
+    assert (
+        system_interface.monitor_journalctl_for_message(
+            "ggl." + component_cloud_name + ".service",
+            "Evergreen's dev experience is great!",
+            timeout=20,
+        )
+        == True
+    )
 
 
 # As a component developer, I expect kernel to fail the deployment if the checksum of downloaded artifacts does not match with the checksum in the recipe.
-def test_Component_27_T1(gg_util_obj):
+def test_Component_27_T1(gg_util_obj, system_interface):
     # Given I upload component "HelloWorld" version "1.0.0" from the local store
     # And I ensure component "HelloWorld" version "1.0.0" exists on cloud within 120 seconds
     # And kernel registered as a Thing
@@ -449,7 +477,7 @@ def test_Component_27_T1(gg_util_obj):
     #        | HelloWorld | 1.0.0 |
     # And I deploy the deployment configuration
     deployment_id = gg_util_obj.create_deployment(
-        f"arn:aws:iot:{gg_util_obj._region}:{gg_util_obj._account}:thinggroup/rawalexe-deployment-test",
+        f"arn:aws:iot:{gg_util_obj._region}:{gg_util_obj._account}:thinggroup/{gg_util_obj._thing_group}",
         component_cloud_name,
         "1.0.0",
     )["deploymentId"]
@@ -460,11 +488,14 @@ def test_Component_27_T1(gg_util_obj):
         630, deployment_id) == "FAILED"
 
     # the greengrass log eventually contains the line "Failed to verify digest." within 30 seconds
-    assert (gg_util_obj.monitor_journalctl_for_message(
-        "ggl.core.ggdeploymentd.service",
-        "Failed to verify digest.",
-        timeout=30,
-    ) == True)
+    assert (
+        system_interface.monitor_journalctl_for_message(
+            "ggl.core.ggdeploymentd.service",
+            "Failed to verify digest.",
+            timeout=30,
+        )
+        == True
+    )
 
 
 # Scenario: FleetStatus-1-T1: As a customer I can get thing information with components whose statuses have changed after an IoT Jobs deployment succeeds
@@ -480,7 +511,7 @@ def test_FleetStatus_1_T1(gg_util_obj):
     #        | HelloWorld | 1.0.0 |
     # And I deploy the configuration for deployment FirstDeployment
     deployment_id = gg_util_obj.create_deployment(
-        f"arn:aws:iot:{gg_util_obj._region}:{gg_util_obj._account}:thinggroup/rawalexe-deployment-test",
+        f"arn:aws:iot:{gg_util_obj._region}:{gg_util_obj._account}:thinggroup/{gg_util_obj._thing_group}",
         component_cloud_name,
         "1.0.0",
         "FirstDeployment",
@@ -492,5 +523,7 @@ def test_FleetStatus_1_T1(gg_util_obj):
 
     # And I can get the thing status as "HEALTHY" with all uploaded components within 60 seconds with groups
     #      | FssThingGroup |
-    assert gg_util_obj.get_ggcore_device_status(
-        60, "rawalexe-deployment-test") == "HEALTHY"
+    assert (
+        gg_util_obj.get_ggcore_device_status(60, f"{gg_util_obj._thing_group}")
+        == "HEALTHY"
+    )

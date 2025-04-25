@@ -11,3 +11,4 @@ dependency-reduced-pom.xml
 testResults
 cucumber.json
 *DS_Store
+*__pycache__

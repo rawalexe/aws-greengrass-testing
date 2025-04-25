@@ -18,7 +18,9 @@ def findall_recursive(node, element):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input', type=argparse.FileType('r'), help='Input file to parse')
+    parser.add_argument('--input',
+                        type=argparse.FileType('r'),
+                        help='Input file to parse')
     parser.add_argument('--token', type=str, help='GitHub token')
     args = parser.parse_args()
 
@@ -51,24 +53,32 @@ def main():
     body += "\n" + my_body_dedupe
 
     token = args.token
-    pr = json.load(open(os.getenv("GITHUB_EVENT_PATH"), 'r'))["pull_request"]["number"]
+    pr = json.load(open(os.getenv("GITHUB_EVENT_PATH"),
+                        'r'))["pull_request"]["number"]
 
     gh = GitHub(token=token)
-    existing_comments = gh.repos[os.getenv("GITHUB_REPOSITORY")].issues[pr].comments.get()
+    existing_comments = gh.repos[os.getenv(
+        "GITHUB_REPOSITORY")].issues[pr].comments.get()
     if existing_comments[0] == 200:
-        existing_comments = list(filter(lambda i: my_body_dedupe in i["body"], existing_comments[1]))
+        existing_comments = list(
+            filter(lambda i: my_body_dedupe in i["body"],
+                   existing_comments[1]))
     else:
         existing_comments = []
 
     if existing_comments:
         comment_id = existing_comments[0]["id"]
         if incompatible:
-            updated_issue = gh.repos[os.getenv("GITHUB_REPOSITORY")].issues.comments[comment_id].patch(body={"body": body})
+            updated_issue = gh.repos[os.getenv(
+                "GITHUB_REPOSITORY")].issues.comments[comment_id].patch(
+                    body={"body": body})
             print(updated_issue, flush=True)
         else:
-            gh.repos[os.getenv("GITHUB_REPOSITORY")].issues.comments[comment_id].delete()
+            gh.repos[os.getenv(
+                "GITHUB_REPOSITORY")].issues.comments[comment_id].delete()
     elif incompatible:
-        issue = gh.repos[os.getenv("GITHUB_REPOSITORY")].issues[pr].comments.post(body={"body": body})
+        issue = gh.repos[os.getenv(
+            "GITHUB_REPOSITORY")].issues[pr].comments.post(body={"body": body})
         print(issue, flush=True)
 
 

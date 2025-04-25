@@ -1,10 +1,10 @@
 ---
-RecipeFormatVersion: '2020-01-25'
+RecipeFormatVersion: "2020-01-25"
 ComponentName: _MultiPlatform_
-ComponentVersion: '1.0.0'
+ComponentVersion: "1.0.0"
 ComponentConfiguration:
   DefaultConfiguration:
-    Message: 'World'
+    Message: "World"
 ComponentDescription: Hello World App for Evergreen
 ComponentPublisher: GG UAT
 Manifests:
@@ -17,9 +17,9 @@ Manifests:
       - URI: s3://$bucketName$/$testArtifactsDirectory$/hello_world.py
     Lifecycle:
       run: |-
-          while true; do
-          python3 {artifacts:path}/hello_world.py '{configuration:/Message}'; sleep 5
-          done
+        while true; do
+        python3 {artifacts:path}/hello_world.py '{configuration:/Message}'; sleep 5
+        done
 
   - Platform:
       os: windows
@@ -47,7 +47,8 @@ Lifecycle:
       python3 {artifacts:path}/hello_world.py '{configuration:/Message}'; sleep 5
       done
     windows: >-
-      powershell -command "& { while(1) { python {artifacts:path}/hello_world.py \"{configuration:/Message}\"; sleep 5 } }"
+      powershell -command "& { while(1) { python {artifacts:path}/hello_world.py
+      \"{configuration:/Message}\"; sleep 5 } }"
     custom: |-
       echo Hello {configuration:/Message} from custom platform!
     all: |-

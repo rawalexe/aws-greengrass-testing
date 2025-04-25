@@ -1,10 +1,10 @@
 ---
-RecipeFormatVersion: '2020-01-25'
+RecipeFormatVersion: "2020-01-25"
 ComponentName: _HelloWorld_
-ComponentVersion: '1.0.0'
+ComponentVersion: "1.0.0"
 ComponentConfiguration:
   DefaultConfiguration:
-    Message: 'World'
+    Message: "World"
 ComponentDescription: Hello World App for Evergreen
 ComponentPublisher: GG UAT
 Manifests:
@@ -14,7 +14,9 @@ Manifests:
       - URI: s3://$bucketName$/$testArtifactsDirectory$/hello_world.py
     Lifecycle:
       Run: >-
-        powershell -command "& { while(1) { python {artifacts:path}/hello_world.py \"{configuration:/Message}\"; sleep 5 } }"
+        powershell -command "& { while(1) { python
+        {artifacts:path}/hello_world.py \"{configuration:/Message}\"; sleep 5 }
+        }"
   - Platform:
       os: "*"
       runtime: "*"

@@ -12,6 +12,7 @@ S3_ARTIFACT_DIR = "artifacts"
 
 
 class SystemInterface:
+
     def __init__(self):
         pass
 
@@ -45,7 +46,6 @@ class SystemInterface:
 
                 output = process.stdout.readline()
                 if output:
-                    print(output.strip())
                     if message in output.strip():
                         print(f"Found log")
                         return True
@@ -73,6 +73,7 @@ class SystemInterface:
 
 
 class GGTestUtils:
+
     def __init__(self, account, bucket, region, thing_group):
         self._region = region
         self._account = account
@@ -413,12 +414,10 @@ def test_Component_12_T1(gg_util_obj, system_interface):
     """ GG LITE CLI DOESN"T SUPPORT THIS YET. """
 
     # And  the MultiPlatform log eventually contains the line "Hello world!" within 20 seconds
-    assert (
-        system_interface.monitor_journalctl_for_message(
-            "ggl." + component_cloud_name + ".service", "Hello world! World", timeout=20
-        )
-        == True
-    )
+    assert (system_interface.monitor_journalctl_for_message(
+        "ggl." + component_cloud_name + ".service",
+        "Hello world! World",
+        timeout=20) == True)
 
 
 # GC developer can create a component with recipes containing s3 artifact. GGC operator can deploy it and artifact can be run.
@@ -447,14 +446,11 @@ def test_Component_16_T1(gg_util_obj, system_interface):
     """ GG LITE CLI DOESN"T SUPPORT THIS YET. """
 
     # Then the HelloWorld log contains the line "Evergreen's dev experience is great!"
-    assert (
-        system_interface.monitor_journalctl_for_message(
-            "ggl." + component_cloud_name + ".service",
-            "Evergreen's dev experience is great!",
-            timeout=20,
-        )
-        == True
-    )
+    assert (system_interface.monitor_journalctl_for_message(
+        "ggl." + component_cloud_name + ".service",
+        "Evergreen's dev experience is great!",
+        timeout=20,
+    ) == True)
 
 
 # As a component developer, I expect kernel to fail the deployment if the checksum of downloaded artifacts does not match with the checksum in the recipe.
@@ -488,14 +484,11 @@ def test_Component_27_T1(gg_util_obj, system_interface):
         630, deployment_id) == "FAILED"
 
     # the greengrass log eventually contains the line "Failed to verify digest." within 30 seconds
-    assert (
-        system_interface.monitor_journalctl_for_message(
-            "ggl.core.ggdeploymentd.service",
-            "Failed to verify digest.",
-            timeout=30,
-        )
-        == True
-    )
+    assert (system_interface.monitor_journalctl_for_message(
+        "ggl.core.ggdeploymentd.service",
+        "Failed to verify digest.",
+        timeout=30,
+    ) == True)
 
 
 # Scenario: FleetStatus-1-T1: As a customer I can get thing information with components whose statuses have changed after an IoT Jobs deployment succeeds
@@ -523,7 +516,5 @@ def test_FleetStatus_1_T1(gg_util_obj):
 
     # And I can get the thing status as "HEALTHY" with all uploaded components within 60 seconds with groups
     #      | FssThingGroup |
-    assert (
-        gg_util_obj.get_ggcore_device_status(60, f"{gg_util_obj._thing_group}")
-        == "HEALTHY"
-    )
+    assert (gg_util_obj.get_ggcore_device_status(
+        60, f"{gg_util_obj._thing_group}") == "HEALTHY")

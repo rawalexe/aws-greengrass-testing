@@ -153,7 +153,7 @@ class GGTestUtils:
             deployment_name="UATinPython") -> CreateDeploymentResponseTypeDef:
         component_parsed_dict = {}
         for component in component_list:
-            if (component[2]):
+            if (len(component) > 2):
                 component_parsed_dict[component[0]] = {
                     "componentVersion": component[1],
                     "configurationUpdate": {

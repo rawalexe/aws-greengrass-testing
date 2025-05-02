@@ -18,3 +18,6 @@ thing_name = ""
 
 # Location of ggl-cli binary
 ggl_cli_bin_path = "../aws-greengrass-lite/build/bin/ggl-cli"
+
+# GGL install directory
+ggl_install_dir = "/var/lib/greengrass/"

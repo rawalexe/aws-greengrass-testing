@@ -58,7 +58,6 @@ MQTT_TEST_TOPICS: List[Tuple[str, str, bool]] = [
 ]
 
 
-
 # Scenario: Security-6-T2 & Security-6-T3
 # As a service owner, I want to specify which components can and cannot publish on which topic.
 @mark.parametrize("resource,topic,accepted", ACL_TEST_TOPICS)

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - python_testing
+      - ciTest
   workflow_dispatch:
   pull_request:
 

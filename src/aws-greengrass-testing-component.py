@@ -5,7 +5,7 @@ from src.SystemInterface import SystemInterface
 from config import config
 
 
-@pytest.fixture(scope="function")    # Runs for each test function
+@pytest.fixture(scope="function")    # Runs for each test functio
 def gg_util_obj():
     # Setup an instance of the GGUtils class. It is then passed to the
     # test functions.

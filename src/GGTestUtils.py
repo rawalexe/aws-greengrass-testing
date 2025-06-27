@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Sequence, Optional, Any, Dict, List, Literal, Optional, Sequence, NamedTuple
 
 S3_ARTIFACT_DIR = "artifacts"
-
+RECIPE_DIR = "/var/lib/greengrass/packages/recipes"
 
 class ComponentDeploymentInfo(NamedTuple):
     name: str
@@ -39,18 +39,15 @@ class GGTestUtils:
     _ggServiceList: List[str]
     _ggDeploymentToThingNameList: List[Tuple[str,str]]
 
-    def __init__(self, account: str, bucket: str, region: str,
-                 cli_bin_path: str, install_dir: str):
+    def __init__(self, account: str, bucket: str, region: str, cli_bin_path: str):
         self._region = region
         self._account = account
         self._bucket = bucket
         self._cli_bin_path = cli_bin_path
-        self._install_dir = install_dir
         self._ggClient = boto3.client("greengrassv2", region_name=self._region)
         self._iotClient = boto3.client("iot", region_name=self._region)
         self._s3Client = boto3.client("s3", region_name=self._region)
         self._ggComponentToDeleteArn = []
-        self._ggS3ObjToDelete = []
         self._ggServiceList = []
         self._ggDeploymentToThingNameList = []
 
@@ -69,10 +66,6 @@ class GGTestUtils:
     @property
     def cli_bin_path(self) -> str:
         return self._cli_bin_path
-
-    @property
-    def install_dir(self) -> str:
-        return self._install_dir
 
     def get_thing_group_arn(self, thing_group: str) -> str:
         return f"arn:aws:iot:{self.aws_region}:{self.aws_account}:thinggroup/{thing_group}"
@@ -138,7 +131,7 @@ class GGTestUtils:
                         else:
                             statistic = self._ggClient.list_effective_deployments(
                                 coreDeviceThingName=thing, maxResults=100, nextToken=next_token)
-                        
+
                         if "nextToken" in statistic:
                             next_token = statistic["nextToken"]
                         else:
@@ -148,7 +141,7 @@ class GGTestUtils:
 
                         if statistic:
                             statistics_list.append({thing: statistic})
-                        
+
                 except Exception as e:
                     print(f"Error getting statistics for {thing}: {str(e)}")
 
@@ -251,13 +244,13 @@ class GGTestUtils:
             deployment_name="FirstDeployment")["deploymentId"]
 
         print(f"New deployment created: {new_deployment}")
-        
+
         result = self.wait_for_deployment_till_timeout(120, new_deployment)
-        
+
         print(f"The removal of component through deployment: {result}")
-        
+
         return result
-    
+
     def remove_all_components(self, thing_group_arn:str)-> Literal['SUCCEEDED', 'FAILED', 'TIMEOUT']:
         # Create a new deployment with the empty components
         new_deployment = self.create_deployment(
@@ -266,13 +259,13 @@ class GGTestUtils:
             deployment_name="FirstDeployment")["deploymentId"]
 
         print(f"New deployment created: {new_deployment}")
-        
+
         result = self.wait_for_deployment_till_timeout(120, new_deployment)
-        
+
         print(f"The removal of component through deployment: {result}")
-        
+
         return result
-    
+
     def wait_for_deployment_till_timeout(
             self, timeout: float,
             deployment_id: str) -> Literal['SUCCEEDED', 'FAILED', 'TIMEOUT']:
@@ -319,7 +312,6 @@ class GGTestUtils:
             try:
                 # Upload the file
                 self._s3Client.upload_file(file_path, bucket_name, object_name)
-                self._ggS3ObjToDelete.append(object_name)
             except Exception as e:
                 print(f"Error uploading file: {e}")
                 return False
@@ -579,25 +571,38 @@ class GGTestUtils:
                     f'Failed to delete component {componentArn} from configured test account.'
                 )
 
-        for artifact in self._ggS3ObjToDelete:
-            try:
-                self._s3Client.delete_object(Bucket=self.s3_artifact_bucket,
-                                             Key=artifact)
-            except:
-                logging.warning(
-                    f'Failed to delete s3 key {artifact} from configured test bucket.'
+        folder_path = S3_ARTIFACT_DIR + "/"
+        # List all objects within the folder
+        paginator = self._s3Client.get_paginator('list_objects_v2')
+        objects_to_delete = []
+
+        for page in paginator.paginate(Bucket=self.s3_artifact_bucket, Prefix=folder_path):
+            if 'Contents' in page:
+                for obj in page['Contents']:
+                    objects_to_delete.append({'Key': obj['Key']})
+
+        if objects_to_delete:
+            # Delete objects in batches of 1000 (S3 limit)
+            for i in range(0, len(objects_to_delete), 1000):
+                batch = objects_to_delete[i:i+1000]
+                self._s3Client.delete_objects(
+                    Bucket=self.s3_artifact_bucket,
+                    Delete={
+                        'Objects': batch,
+                        'Quiet': True
+                    }
                 )
 
         # Extract unique thing_group_arns
         unique_thing_groups = {thing_group_arn for _, thing_group_arn in self._ggDeploymentToThingNameList}
-        
+
         for unique in unique_thing_groups:
             try:
                 print(f"Cleaning up thing group arn: {unique}")
                 self.remove_all_components(thing_group_arn=unique)
             except Exception as e:
                 print(e)
-        
+
         for (deployment,thing_group_arn) in self._ggDeploymentToThingNameList:
             try:
                 print(f"Cleaning up deployment: {deployment}, with thing group arn: {thing_group_arn}")
@@ -608,7 +613,6 @@ class GGTestUtils:
 
         # Reset the lists.
         self._ggComponentToDeleteArn = []
-        self._ggS3ObjToDelete = []
         self._ggDeploymentToThingNameList = []
 
         logging.debug("Cleaned up services List:")
@@ -685,5 +689,5 @@ class GGTestUtils:
             raise
 
     def recipe_for_component_exists(self, component_name: str, component_version: str):
-        print(f"Checking if file {(Path(self._install_dir) / "packages/recipes" / f"{component_name}-{component_version}.yaml")} exists")
-        return (Path(self._install_dir) / "packages/recipes" / f"{component_name}-{component_version}.yaml").exists()
+        print(f"Checking if file {(Path(RECIPE_DIR) / f"{component_name}-{component_version}.yaml")} exists")
+        return (Path(RECIPE_DIR) / f"{component_name}-{component_version}.yaml").exists()

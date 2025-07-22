@@ -1,13 +1,11 @@
-import time
 from typing import Generator, List, Tuple
 from pytest import fixture, mark
+from src.IoTUtils import IoTUtils
 from src.GGTestUtils import GGTestUtils
 from src.SystemInterface import SystemInterface
 
-
-@fixture
-def security_thing_group(request):
-    return request.config.getoption("--security_thing_group")
+import time
+import src.GGLSetup as ggl_setup
 
 
 @fixture(scope="function")
@@ -18,10 +16,25 @@ def gg_util_obj(request) -> Generator[GGTestUtils, None, None]:
     ggl_cli_path = request.config.getoption("--ggl-cli-path")
 
     gg_util_obj = GGTestUtils(aws_account, s3_bucket, region, ggl_cli_path)
+
     yield gg_util_obj
 
-    # Cleanup the artifacts, components etc.
     gg_util_obj.cleanup()
+
+
+@fixture(scope="function")
+def iot_obj(request) -> Generator[IoTUtils, None, None]:
+    region = request.config.getoption("--region")
+    commit_id = request.config.getoption("--commit-id")
+    iot_obj = IoTUtils(region)
+
+    iot_obj.set_up_core_device()
+    ggl_setup.install_greengrass_lite_from_source(commit_id, region)
+
+    yield iot_obj
+
+    ggl_setup.clean_up()
+    iot_obj.clean_up()
 
 
 @fixture(scope="function")    # Runs for each test function
@@ -31,7 +44,7 @@ def system_interface() -> Generator[SystemInterface, None, None]:
     # yield the instance of the class to the tests.
     yield interface
 
-    # This secion is called AFTER the test is run.
+    # This section is called AFTER the test is run.
     pass
 
 
@@ -64,9 +77,14 @@ MQTT_TEST_TOPICS: List[Tuple[str, str, bool]] = [
 # As a service owner, I want to specify which components can and cannot publish and subscribe on which topic.
 # @mark.parametrize("resource,topic,accepted", ACL_TEST_TOPICS)
 @mark.skip(reason="TODO: Debug the case when the deployment should fail")
-def test_Security_6_T2_T3_T4_T5_T10(security_thing_group: str,
-                                    gg_util_obj: GGTestUtils, resource: str,
-                                    topic: str, accepted: bool):
+def test_Security_6_T2_T3_T4_T5_T10(iot_obj: IoTUtils, gg_util_obj: GGTestUtils,
+                                    system_interface: SystemInterface):
+    security_thing_name = iot_obj.thing_name
+    id = iot_obj.generate_random_id()
+    security_thing_group_name = iot_obj.generate_thing_group_name(id)
+    security_thing_group_result = iot_obj.add_thing_to_thing_group(
+        security_thing_name, security_thing_group_name)
+    assert security_thing_group_result is True
 
     pubsub_cloud_name = gg_util_obj.upload_component_with_versions(
         "HelloWorldPubSub", ["1.0.0"])
@@ -96,7 +114,7 @@ def test_Security_6_T2_T3_T4_T5_T10(security_thing_group: str,
         })
 
     deployment_id = gg_util_obj.create_deployment(
-        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group),
+        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group_name),
         component_list=[pubsub_cloud_name],
         deployment_name="FirstDeployment")["deploymentId"]
 
@@ -112,10 +130,16 @@ def test_Security_6_T2_T3_T4_T5_T10(security_thing_group: str,
 # As a service owner, I want to specify which components can or cannot publish and subscribe on which mqtt topic
 # @mark.parametrize("resource,topic,accepted", ACL_TEST_TOPICS + MQTT_TEST_TOPICS)
 @mark.skip(reason="TODO: Debug the case when the deployment should fail")
-def test_Security_6_T2_T3_T4_T5_mqtt(gg_util_obj: GGTestUtils,
-                                     security_thing_group: str, resource: str,
-                                     topic: str, accepted: bool):
+def test_Security_6_T2_T3_T4_T5_mqtt(iot_obj: IoTUtils,
+                                     gg_util_obj: GGTestUtils,
+                                     system_interface: SystemInterface):
     # Get an auto generated thing group to which the thing is added.
+    security_thing_name = iot_obj.thing_name
+    id = iot_obj.generate_random_id()
+    security_thing_group_name = iot_obj.generate_thing_group_name(id)
+    security_thing_group_result = iot_obj.add_thing_to_thing_group(
+        security_thing_name, security_thing_group_name)
+    assert security_thing_group_result is True
 
     mqtt_cloud_name = gg_util_obj.upload_component_with_versions(
         "HelloWorldMqtt", ["1.0.0"])
@@ -146,7 +170,7 @@ def test_Security_6_T2_T3_T4_T5_mqtt(gg_util_obj: GGTestUtils,
         })
 
     deployment_id = gg_util_obj.create_deployment(
-        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group),
+        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group_name),
         component_list=[mqtt_cloud_name],
         deployment_name="FirstDeployment")["deploymentId"]
 
@@ -160,8 +184,14 @@ def test_Security_6_T2_T3_T4_T5_mqtt(gg_util_obj: GGTestUtils,
 
 # Scenario: Security-6-T6
 # As a service owner, I want to specify that all components can publish and subscribe on all topics
-def test_Security_6_T6(gg_util_obj: GGTestUtils, security_thing_group: str,
+def test_Security_6_T6(iot_obj: IoTUtils, gg_util_obj: GGTestUtils,
                        system_interface: SystemInterface):
+    security_thing_name = iot_obj.thing_name
+    id = iot_obj.generate_random_id()
+    security_thing_group_name = iot_obj.generate_thing_group_name(id)
+    security_thing_group_result = iot_obj.add_thing_to_thing_group(
+        security_thing_name, security_thing_group_name)
+    assert security_thing_group_result is True
 
     # When I install the component HelloWorldPubSub version 1.0.0 from local store
     pubsub_cloud_name = gg_util_obj.upload_component_with_versions(
@@ -172,7 +202,7 @@ def test_Security_6_T6(gg_util_obj: GGTestUtils, security_thing_group: str,
             "Fatal error: HelloWorldPubSub cannot be uploaded to cloud")
 
     deployment_id = gg_util_obj.create_deployment(
-        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group),
+        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group_name),
         component_list=[pubsub_cloud_name],
         deployment_name="FirstDeployment")["deploymentId"]
 
@@ -194,8 +224,14 @@ def test_Security_6_T6(gg_util_obj: GGTestUtils, security_thing_group: str,
 
 # Scenario: Security-6-T7
 # As a service owner, I want to ensure authorization persists across fresh restarts
-def test_Security_6_T7(gg_util_obj: GGTestUtils, security_thing_group: str,
+def test_Security_6_T7(iot_obj: IoTUtils, gg_util_obj: GGTestUtils,
                        system_interface: SystemInterface):
+    security_thing_name = iot_obj.thing_name
+    id = iot_obj.generate_random_id()
+    security_thing_group_name = iot_obj.generate_thing_group_name(id)
+    security_thing_group_result = iot_obj.add_thing_to_thing_group(
+        security_thing_name, security_thing_group_name)
+    assert security_thing_group_result is True
 
     # When I install the component HelloWorldPubSub version 1.0.0 from local store
     pubsub_cloud_name = gg_util_obj.upload_component_with_versions(
@@ -206,7 +242,7 @@ def test_Security_6_T7(gg_util_obj: GGTestUtils, security_thing_group: str,
             "Fatal error: HelloWorldPubSub cannot be uploaded to cloud")
 
     deployment_id = gg_util_obj.create_deployment(
-        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group),
+        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group_name),
         component_list=[pubsub_cloud_name],
         deployment_name="FirstDeployment")["deploymentId"]
 
@@ -250,8 +286,15 @@ def test_Security_6_T7(gg_util_obj: GGTestUtils, security_thing_group: str,
 
 
 # Scenario: Security-6-T15: As a service owner, when I remove a component, all of that component's ACLs are removed as well
-def test_Security_6_T15(gg_util_obj: GGTestUtils, security_thing_group: str,
+def test_Security_6_T15(iot_obj: IoTUtils, gg_util_obj: GGTestUtils,
                         system_interface: SystemInterface):
+    security_thing_name = iot_obj.thing_name
+    id = iot_obj.generate_random_id()
+    security_thing_group_name = iot_obj.generate_thing_group_name(id)
+    security_thing_group_result = iot_obj.add_thing_to_thing_group(
+        security_thing_name, security_thing_group_name)
+    assert security_thing_group_result is True
+
     # When I install the component HelloWorldPubSub version 1.0.0 from local store
     hello_world_pubSub = gg_util_obj.upload_component_with_versions(
         "HelloWorldPubSub", ["0.0.0"])
@@ -280,7 +323,7 @@ def test_Security_6_T15(gg_util_obj: GGTestUtils, security_thing_group: str,
         })
 
     deployment_id = gg_util_obj.create_deployment(
-        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group),
+        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group_name),
         component_list=[hello_world_pubSub],
         deployment_name="FirstDeployment")["deploymentId"]
 
@@ -305,7 +348,7 @@ def test_Security_6_T15(gg_util_obj: GGTestUtils, security_thing_group: str,
     # Then I can check the cli to see the component HelloWorldPubSub is not listed
     status = gg_util_obj.remove_component(
         deployment_id, hello_world_pubSub.name,
-        gg_util_obj.get_thing_group_arn(security_thing_group))
+        gg_util_obj.get_thing_group_arn(security_thing_group_name))
 
     assert (status == 'SUCCEEDED')
 
@@ -318,7 +361,7 @@ def test_Security_6_T15(gg_util_obj: GGTestUtils, security_thing_group: str,
             "Message": "Hello from local pubsub topic"
         })
     deployment_id = gg_util_obj.create_deployment(
-        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group),
+        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group_name),
         component_list=[hello_world_pubSub],
         deployment_name="FirstDeployment")["deploymentId"]
     # Then I can check the cli to see the status of component HelloWorldPubSub is RUNNING
@@ -336,8 +379,15 @@ def test_Security_6_T15(gg_util_obj: GGTestUtils, security_thing_group: str,
 
 # Scenario: Security-6-T22
 # As a service owner, if I have multiple ACL policies, I can update one at a time
-def test_Security_6_T22(security_thing_group: str, gg_util_obj: GGTestUtils,
+def test_Security_6_T22(iot_obj: IoTUtils, gg_util_obj: GGTestUtils,
                         system_interface: SystemInterface):
+
+    security_thing_name = iot_obj.thing_name
+    id = iot_obj.generate_random_id()
+    security_thing_group_name = iot_obj.generate_thing_group_name(id)
+    security_thing_group_result = iot_obj.add_thing_to_thing_group(
+        security_thing_name, security_thing_group_name)
+    assert security_thing_group_result is True
 
     # When I install the component PubsubSubscriber version 0.0.0 from local store
     subscriber_cloud_name = gg_util_obj.upload_component_with_versions(
@@ -351,7 +401,7 @@ def test_Security_6_T22(security_thing_group: str, gg_util_obj: GGTestUtils,
     assert publisher_cloud_name is not None
 
     deployment_1 = gg_util_obj.create_deployment(
-        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group),
+        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group_name),
         component_list=[subscriber_cloud_name, publisher_cloud_name],
         deployment_name="FirstDeployment")["deploymentId"]
 
@@ -395,7 +445,7 @@ def test_Security_6_T22(security_thing_group: str, gg_util_obj: GGTestUtils,
         })
 
     deployment_2 = gg_util_obj.create_deployment(
-        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group),
+        thingArn=gg_util_obj.get_thing_group_arn(security_thing_group_name),
         component_list=[subscriber_cloud_name, publisher_cloud_name],
         deployment_name="FirstDeployment")["deploymentId"]
 

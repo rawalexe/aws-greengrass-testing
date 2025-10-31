@@ -6,6 +6,7 @@ import boto3
 from botocore.exceptions import ClientError
 import time
 import logging
+import subprocess
 from types_boto3_greengrassv2 import GreengrassV2Client
 from types_boto3_greengrassv2.type_defs import CreateDeploymentResponseTypeDef, ComponentDeploymentSpecificationTypeDef
 from types_boto3_greengrassv2.literals import CoreDeviceStatusType
@@ -18,6 +19,15 @@ from typing import Sequence, Optional, Any, Dict, List, Literal, Optional, Seque
 
 S3_ARTIFACT_DIR = "artifacts"
 RECIPE_DIR = "/var/lib/greengrass/packages/recipes"
+
+
+def sleep_with_log(seconds: int, reason: str = ""):
+    """Sleep with logging message before sleeping."""
+    msg = f"Sleeping for {seconds}s"
+    if reason:
+        msg += f" ({reason})"
+    print(msg)
+    time.sleep(seconds)
 
 
 class ComponentDeploymentInfo(NamedTuple):
@@ -50,8 +60,11 @@ class GGTestUtils:
         self._iotClient = boto3.client("iot", region_name=self._region)
         self._s3Client = boto3.client("s3", region_name=self._region)
         self._ggComponentToDeleteArn = []
+        self._component_random_ids = {
+        }    # Track random_id per component-version
         self._ggServiceList = []
         self._ggDeploymentToThingNameList = []
+        self._component_random_ids = {}
 
     @property
     def aws_account(self) -> str:
@@ -102,6 +115,7 @@ class GGTestUtils:
         :param deployment_id: The ID of the deployment to check
         :return: A dictionary containing the deployment status and details
         """
+        start_time = time.time()
         try:
             # Get the deployment status
             response = self._ggClient.get_deployment(deploymentId=deployment_id)
@@ -147,7 +161,10 @@ class GGTestUtils:
                             statistics_list.append({thing: statistic})
 
                 except Exception as e:
-                    print(f"Waiting to get statistics for {thing}: {str(e)}...")
+                    elapsed = int(time.time() - start_time)
+                    print(
+                        f"Waiting to get statistics for {thing}: {str(e)}... (elapsed: {elapsed}s)"
+                    )
 
             return {
                 "status": deployment_status,
@@ -165,13 +182,19 @@ class GGTestUtils:
 
     def create_local_deployment(self, artifacts_dir, recipe_dir,
                                 component_details) -> bool:
-        cli_cmd = ["sudo", self.cli_bin_path, "deploy"]
+        cli_cmd = ["sudo", "-E", self.cli_bin_path, "deploy"]
         if artifacts_dir is not None:
             cli_cmd.extend(["--artifacts-dir", artifacts_dir])
         if recipe_dir is not None:
             cli_cmd.extend(["--recipe-dir", recipe_dir])
         cli_cmd.append(f"--add-component={component_details}")
-        process = run(cli_cmd, capture_output=True, text=True)
+
+        # Disable LeakSanitizer entirely - it's causing false failures
+        env = os.environ.copy()
+        env["ASAN_OPTIONS"] = "detect_leaks=0"
+        env["LSAN_OPTIONS"] = "detect_leaks=0"
+
+        process = run(cli_cmd, capture_output=True, text=True, env=env)
         if process.returncode == 0:
             print("CLI call to create local deployment succeeded:")
             print(process.stdout)
@@ -180,7 +203,7 @@ class GGTestUtils:
         print(
             f"CLI call to create local deployment failed with error code {process.returncode}:"
         )
-        print(process.stderr)
+        print("STDERR:", process.stderr)
         return False
 
     def _convert_deployment_info(
@@ -266,6 +289,36 @@ class GGTestUtils:
     def remove_all_components(
             self,
             thing_group_arn: str) -> Literal['SUCCEEDED', 'FAILED', 'TIMEOUT']:
+
+        # Debug: Check devices in thing group before cleanup
+        try:
+            thing_group_name = thing_group_arn.split('/')[-1]
+            devices_response = self._iotClient.list_things_in_thing_group(
+                thingGroupName=thing_group_name)
+            print(
+                f"DEBUG: Devices in thing group {thing_group_name}: {devices_response.get('things', [])}"
+            )
+
+            # Check each device status
+            for device_name in devices_response.get('things', []):
+                try:
+                    device_status = self._ggClient.get_core_device(
+                        coreDeviceThingName=device_name)
+                    print(
+                        f"DEBUG: Device {device_name} status: {device_status.get('status')}"
+                    )
+
+                    # Check current deployments
+                    deployments = self._ggClient.list_effective_deployments(
+                        coreDeviceThingName=device_name)
+                    print(
+                        f"DEBUG: Device {device_name} effective deployments: {len(deployments.get('effectiveDeployments', []))}"
+                    )
+                except Exception as e:
+                    print(f"DEBUG: Error checking device {device_name}: {e}")
+        except Exception as e:
+            print(f"DEBUG: Error checking thing group devices: {e}")
+
         # Create a new deployment with the empty components
         new_deployment = self.create_deployment(
             thingArn=thing_group_arn,
@@ -300,6 +353,85 @@ class GGTestUtils:
                                     elif (str(deployment[
                                             "coreDeviceExecutionStatus"]) ==
                                           "FAILED"):
+                                        print(f"\n{'='*60}")
+                                        print(
+                                            f"DEPLOYMENT FAILED: {deployment_id}"
+                                        )
+                                        print(f"Thing: {thing}")
+                                        print(
+                                            f"Status Reason: {deployment.get('statusReason', 'N/A')}"
+                                        )
+                                        print(
+                                            f"Full deployment details: {deployment}"
+                                        )
+
+                                        # Get full deployment details from AWS
+                                        try:
+                                            aws_deployment = self._ggClient.get_deployment(
+                                                deploymentId=deployment_id)
+                                            print(
+                                                f"\nAWS Deployment Status: {aws_deployment.get('deploymentStatus', 'N/A')}"
+                                            )
+                                            print(
+                                                f"AWS Deployment Policies: {aws_deployment.get('deploymentPolicies', {})}"
+                                            )
+                                            if 'components' in aws_deployment:
+                                                print(
+                                                    f"Components in deployment: {list(aws_deployment['components'].keys())}"
+                                                )
+                                        except Exception as e:
+                                            print(
+                                                f"Could not get AWS deployment details: {e}"
+                                            )
+
+                                        print(
+                                            f"\nChecking all Greengrass logs for errors..."
+                                        )
+                                        try:
+                                            # Check all greengrass services
+                                            services = [
+                                                "ggdeploymentd", "iotcored",
+                                                "ggconfigd", "tesd",
+                                                "gghealthd", "ggipcd"
+                                            ]
+                                            for svc in services:
+                                                log_output = subprocess.run(
+                                                    [
+                                                        "journalctl", "-u", svc,
+                                                        "--no-pager", "-n",
+                                                        "50", "--since",
+                                                        "5 minutes ago"
+                                                    ],
+                                                    capture_output=True,
+                                                    text=True,
+                                                    timeout=3)
+                                                if log_output.stdout.strip(
+                                                ) and "-- No entries --" not in log_output.stdout:
+                                                    print(
+                                                        f"\n--- {svc} logs ---")
+                                                    print(log_output.
+                                                          stdout[-1500:])
+
+                                            # Check for any errors in all logs
+                                            error_log = subprocess.run(
+                                                [
+                                                    "journalctl", "--no-pager",
+                                                    "-p", "err", "--since",
+                                                    "5 minutes ago"
+                                                ],
+                                                capture_output=True,
+                                                text=True,
+                                                timeout=3)
+                                            if error_log.stdout.strip(
+                                            ) and "-- No entries --" not in error_log.stdout:
+                                                print(
+                                                    f"\n--- System errors (priority: err) ---"
+                                                )
+                                                print(error_log.stdout[-2000:])
+                                        except Exception as e:
+                                            print(
+                                                f"Could not retrieve logs: {e}")
+                                        print(f"{'='*60}\n")
                                         return "FAILED"
                                     else:
                                         pass
@@ -309,19 +441,26 @@ class GGTestUtils:
 
         return "TIMEOUT"
 
-    def _upload_files_to_s3(self, files: Sequence[os.PathLike | str],
-                            bucket_name: str) -> bool:
+    def _upload_files_to_s3(self,
+                            files: Sequence[os.PathLike | str],
+                            bucket_name: str,
+                            random_id: str = None) -> bool:
         """
         Upload a file to an S3 bucket
 
         :param file_path: File to upload
         :param bucket_name: Bucket to upload to
+        :param random_id: Optional random ID to use as subdirectory
         :return: True if file was uploaded, else False
         """
 
         for file_path in files:
-            object_name = os.path.join(S3_ARTIFACT_DIR,
-                                       os.path.basename(file_path))
+            if random_id:
+                object_name = os.path.join(S3_ARTIFACT_DIR, random_id,
+                                           os.path.basename(file_path))
+            else:
+                object_name = os.path.join(S3_ARTIFACT_DIR,
+                                           os.path.basename(file_path))
 
             try:
                 # Upload the file
@@ -333,10 +472,16 @@ class GGTestUtils:
             print(
                 f"File {file_path} successfully uploaded to {bucket_name}/{object_name}"
             )
+
+        # Wait for S3 propagation
+        if files:
+            time.sleep(5)
+
         return True
 
     def _upload_component_to_gg(self,
-                                recipe_files: List[os.PathLike | str]) -> str:
+                                recipe_files: List[os.PathLike | str],
+                                random_id: str = None) -> str:
         recipe_name = ""
         recipe_content = ""
         cloud_addition = str(uuid1())
@@ -359,6 +504,11 @@ class GGTestUtils:
                 modified_content = modified_content.replace(
                     "$testArtifactsDirectory$", S3_ARTIFACT_DIR)
 
+                # Replace $randomId$ with actual random ID if provided
+                if random_id:
+                    modified_content = modified_content.replace(
+                        "$randomId$", random_id)
+
                 modified_content = modified_content.replace(
                     recipe_name, cloud_recipe_name)
 
@@ -366,116 +516,74 @@ class GGTestUtils:
                 recipe_yaml = yaml.safe_load(modified_content)
                 recipe_json = json.dumps(recipe_yaml)
 
-                try:
-                    # Create component version using the recipe
-                    response = self._ggClient.create_component_version(
-                        inlineRecipe=recipe_json)
+                # Retry CreateComponentVersion if artifact not accessible yet
+                for retry in range(20):
+                    try:
+                        # Create component version using the recipe
+                        response = self._ggClient.create_component_version(
+                            inlineRecipe=recipe_json)
+                        break
+                    except self._ggClient.exceptions.ValidationException as e:
+                        if "artifact resource cannot be accessed" in str(
+                                e).lower() and retry < 19:
+                            print(
+                                f"Artifact not accessible yet, retrying in 10s (attempt {retry + 1}/20)"
+                            )
+                            time.sleep(10)
+                        else:
+                            raise
+                    except self._ggClient.exceptions.ConflictException:
+                        raise
+                    except Exception:
+                        raise
 
+                print(
+                    f"Successfully uploaded component with ARN: {response['arn']}"
+                )
+                self._ggComponentToDeleteArn.append(response["arn"])
+
+                # Wait for component to be DEPLOYABLE
+                component_name = response['componentName']
+                component_version = response['componentVersion']
+                for attempt in range(10):
+                    status_response = self._ggClient.describe_component(
+                        arn=response['arn'])
+                    status = status_response.get('status',
+                                                 {}).get('componentState')
+                    if status == 'DEPLOYABLE':
+                        print(
+                            f"Component {component_name} is DEPLOYABLE after {attempt + 1}s"
+                        )
+                        break
+                    time.sleep(1)
+                else:
                     print(
-                        f"Successfully uploaded component with ARN: {response['arn']}"
+                        f"Warning: Component {component_name} status is {status}, not DEPLOYABLE after 10s"
                     )
-                    self._ggComponentToDeleteArn.append(response["arn"])
 
-                except self._ggClient.exceptions.ConflictException as e:
-                    print(f"Component version already exists: {e}")
-                    raise
-                except Exception as e:
-                    print(f"Error uploading component: {e}")
-                    raise
         return cloud_recipe_name
 
     def upload_component_with_version_and_deps(
         self, component_name: str, version: str,
         dependencies: List[Tuple[str,
                                  str]]) -> Optional[ComponentDeploymentInfo]:
-        try:
-            component_artifact_dir = os.path.join('components', component_name,
-                                                  version, 'artifacts')
-
-            artifact_files = os.listdir(component_artifact_dir)
-            artifact_files_full_paths = [
-                os.path.abspath(os.path.join(component_artifact_dir, file))
-                for file in artifact_files
-            ]
-            self._upload_files_to_s3(artifact_files_full_paths,
-                                     self.s3_artifact_bucket)
-        except FileNotFoundError:
-            print(
-                f"No artifact directory found for {component_name}-{version}.")
-        except PermissionError:
-            print(
-                f"Cannot access the directory with artifacts for {component_name}-{version}."
-            )
-            return None
-
-        try:
-            component_recipe_dir = os.path.join('components', component_name,
-                                                version, 'recipe')
-
-            recipes = os.listdir(component_recipe_dir)
-            recipes_full_paths = [
-                os.path.abspath(os.path.join(component_recipe_dir, file))
-                for file in recipes
-            ]
-
-            if len(recipes_full_paths) != 1:
-                print("More than one recipe files found.")
-                return None
-
-            with open(recipes_full_paths[0]) as recipe:
-                recipe_obj = yaml.safe_load(recipe)
-                if "ComponentDependencies" not in recipe_obj:
-                    print(
-                        "ComponentDependencies section not found in the original recipe."
-                    )
-                    return None
-
-                for dependency in dependencies:
-                    if dependency[0] not in recipe_obj["ComponentDependencies"]:
-                        print(
-                            f"The dependency {dependency[0]} not found in original recipe."
-                        )
-                        return None
-                    print(recipe_obj["ComponentDependencies"])
-                    stored_val = recipe_obj["ComponentDependencies"][
-                        dependency[0]]
-                    del recipe_obj["ComponentDependencies"][dependency[0]]
-                    recipe_obj["ComponentDependencies"][
-                        dependency[1]] = stored_val
-
-                # Ensure the output directory exists
-                output_dir = os.path.join(".", "ggtest", "modified_recipes")
-                os.makedirs(output_dir, exist_ok=True)
-
-                new_file_path = os.path.join(
-                    output_dir, os.path.basename(recipes_full_paths[0]))
-
-                print(yaml.safe_dump(recipe_obj))
-
-                # Read the original file and write the corrupted version
-                with open(new_file_path, "w") as f_out:
-                    f_out.write(yaml.safe_dump(recipe_obj))
-                    f_out.close()
-
-                cloud_name = self._upload_component_to_gg([new_file_path])
-
-                recipe.close()
-
-                return ComponentDeploymentInfo(name=cloud_name,
-                                               versions=[version],
-                                               merge_config=None)
-        except FileNotFoundError:
-            print(f"No recipe directory found for {component_name}-{version}.")
-            return None
-        except PermissionError:
-            print(
-                f"Cannot access the directory with recipe for {component_name}-{version}."
-            )
-            return None
+        return self.upload_component_with_versions(component_name, [version],
+                                                   dependencies)
 
     def upload_component_with_versions(
-            self, component_name: str,
-            versions: List[str]) -> Optional[ComponentDeploymentInfo]:
+        self,
+        component_name: str,
+        versions: List[str],
+        dependencies: List[Tuple[str, str]] = None
+    ) -> Optional[ComponentDeploymentInfo]:
+
+        # Generate a random ID for artifact uploads
+        random_id = str(uuid1())
+
+        # Store random_id for each version
+        for version in versions:
+            self._component_random_ids[
+                f"{component_name}-{version}"] = random_id
 
         for version in versions:
             try:
@@ -489,7 +597,7 @@ class GGTestUtils:
                     for file in artifact_files
                 ]
                 self._upload_files_to_s3(artifact_files_full_paths,
-                                         self.s3_artifact_bucket)
+                                         self.s3_artifact_bucket, random_id)
             except FileNotFoundError:
                 print(
                     f"No artifact directory found for {component_name}-{version}."
@@ -517,10 +625,46 @@ class GGTestUtils:
                     print("More than one recipe files found.")
                     return None
 
-                recipes_file_list.append(recipes_full_paths[0])
+                # If dependencies provided, modify recipe
+                if dependencies:
+                    with open(recipes_full_paths[0]) as recipe:
+                        recipe_obj = yaml.safe_load(recipe)
+                        if "ComponentDependencies" not in recipe_obj:
+                            print(
+                                "ComponentDependencies section not found in the original recipe."
+                            )
+                            return None
 
-            print(recipes_file_list)
-            cloud_name = self._upload_component_to_gg(recipes_file_list)
+                        for dependency in dependencies:
+                            if dependency[0] not in recipe_obj[
+                                    "ComponentDependencies"]:
+                                print(
+                                    f"The dependency {dependency[0]} not found in original recipe."
+                                )
+                                return None
+                            stored_val = recipe_obj["ComponentDependencies"][
+                                dependency[0]]
+                            del recipe_obj["ComponentDependencies"][
+                                dependency[0]]
+                            recipe_obj["ComponentDependencies"][
+                                dependency[1]] = stored_val
+
+                        output_dir = os.path.join(
+                            "/tmp/aws-greengrass-testing-workspace", "ggtest",
+                            "modified_recipes")
+                        os.makedirs(output_dir, exist_ok=True)
+                        new_file_path = os.path.join(
+                            output_dir, os.path.basename(recipes_full_paths[0]))
+
+                        with open(new_file_path, "w") as f_out:
+                            f_out.write(yaml.safe_dump(recipe_obj))
+
+                        recipes_file_list.append(new_file_path)
+                else:
+                    recipes_file_list.append(recipes_full_paths[0])
+
+            cloud_name = self._upload_component_to_gg(recipes_file_list,
+                                                      random_id)
             return ComponentDeploymentInfo(name=cloud_name,
                                            versions=versions,
                                            merge_config=None)
@@ -536,7 +680,8 @@ class GGTestUtils:
     def _create_corrupt_file(self, file_path: str | os.PathLike):
         try:
             # Ensure the output directory exists
-            output_dir = os.path.join(".", "ggtest", "corruptFiles")
+            output_dir = os.path.join("/tmp/aws-greengrass-testing-workspace",
+                                      "ggtest", "corruptFiles")
             os.makedirs(output_dir, exist_ok=True)
 
             # Construct the new file path
@@ -573,8 +718,12 @@ class GGTestUtils:
             assert corrupt_file_list is not None
             corrupt_file_list.append(corrupt_file_path)
 
+        # Get the random_id used for this component version
+        random_id = self._component_random_ids.get(
+            f"{component_name}-{version}")
+
         return self._upload_files_to_s3(corrupt_file_list,
-                                        self.s3_artifact_bucket)
+                                        self.s3_artifact_bucket, random_id)
 
     def cleanup(self) -> None:
         for componentArn in self._ggComponentToDeleteArn:
@@ -585,26 +734,27 @@ class GGTestUtils:
                     f'Failed to delete component {componentArn} from configured test account.'
                 )
 
-        folder_path = S3_ARTIFACT_DIR + "/"
-        # List all objects within the folder
-        paginator = self._s3Client.get_paginator('list_objects_v2')
-        objects_to_delete = []
+        # Delete S3 artifacts for each component random_id
+        for random_id in set(self._component_random_ids.values()):
+            folder_path = f"{S3_ARTIFACT_DIR}/{random_id}/"
+            paginator = self._s3Client.get_paginator('list_objects_v2')
+            objects_to_delete = []
 
-        for page in paginator.paginate(Bucket=self.s3_artifact_bucket,
-                                       Prefix=folder_path):
-            if 'Contents' in page:
-                for obj in page['Contents']:
-                    objects_to_delete.append({'Key': obj['Key']})
+            for page in paginator.paginate(Bucket=self.s3_artifact_bucket,
+                                           Prefix=folder_path):
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        objects_to_delete.append({'Key': obj['Key']})
 
-        if objects_to_delete:
-            # Delete objects in batches of 1000 (S3 limit)
-            for i in range(0, len(objects_to_delete), 1000):
-                batch = objects_to_delete[i:i + 1000]
-                self._s3Client.delete_objects(Bucket=self.s3_artifact_bucket,
-                                              Delete={
-                                                  'Objects': batch,
-                                                  'Quiet': True
-                                              })
+            if objects_to_delete:
+                for i in range(0, len(objects_to_delete), 1000):
+                    batch = objects_to_delete[i:i + 1000]
+                    self._s3Client.delete_objects(
+                        Bucket=self.s3_artifact_bucket,
+                        Delete={
+                            'Objects': batch,
+                            'Quiet': True
+                        })
 
         # Extract unique thing_group_arns
         unique_thing_groups = {

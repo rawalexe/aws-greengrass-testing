@@ -13,6 +13,7 @@ import zipfile
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 from uuid import uuid1
 from boto3 import client
+import boto3
 import time
 import logging
 import yaml
@@ -24,10 +25,46 @@ S3_ARTIFACT_DIR = "artifacts"
 DEVICE_PATH = "/var/lib/greengrass/device.pem.crt"
 PRIVATE_PATH = "/var/lib/greengrass/private.pem.key"
 CA_PATH = "/var/lib/greengrass/AmazonRootCA1.pem"
-JSON_FILE = "iot_setup_data.json"
+JSON_FILE = "/tmp/aws-greengrass-testing-workspace/iot_setup_data.json"
+WORKSPACE_DIR = "/tmp/aws-greengrass-testing-workspace"
 
 
 def install_greengrass_lite_from_source(commit_id: str, region: str):
+    # Create unique workspace directory
+    os.makedirs(WORKSPACE_DIR, exist_ok=True)
+
+    ggl_path = os.path.join(WORKSPACE_DIR, "aws-greengrass-lite")
+    build_path = os.path.join(ggl_path, 'build')
+
+    # Skip download if already exists in workspace
+    if os.path.exists(ggl_path):
+        print(
+            f"aws-greengrass-lite already exists in {WORKSPACE_DIR}, skipping download"
+        )
+    else:
+        # Check if greengrass-lite exists in current directory or parent
+        current_dir = os.getcwd()
+        for check_dir in [
+                current_dir,
+                os.path.dirname(current_dir),
+                os.path.dirname(os.path.dirname(current_dir))
+        ]:
+            potential_ggl = os.path.join(check_dir, "aws-greengrass-lite")
+            if os.path.exists(potential_ggl) and os.path.exists(
+                    os.path.join(potential_ggl, "CMakeLists.txt")):
+                print(
+                    f"Found aws-greengrass-lite in {check_dir}, copying to workspace"
+                )
+                shutil.copytree(potential_ggl,
+                                ggl_path,
+                                ignore=shutil.ignore_patterns('build'))
+                break
+        else:
+            # Download the source repo if not found locally
+            download_result = _download_source(commit_id, WORKSPACE_DIR)
+            if not download_result:
+                return False
+
     # Get config
     with open(JSON_FILE, 'r') as file:
         data = json.load(file)
@@ -36,14 +73,9 @@ def install_greengrass_lite_from_source(commit_id: str, region: str):
     private_key = data['PRIVATE_KEY']
     thing_name = data['THING_NAME']
 
-    # Download the source repo
-    download_result = _download_source(commit_id)
-    if not download_result:
-        return False
-
     # Change the working dir
     original_dir = os.getcwd()
-    os.chdir("aws-greengrass-lite")
+    os.chdir(ggl_path)
 
     # Set up an iot client
     iot_client = client("iot", region_name=region)
@@ -95,18 +127,64 @@ def install_greengrass_lite_from_source(commit_id: str, region: str):
             return False
 
         # Build
-        build_result = _build_with_cmake()
-        if not build_result:
+        if not os.path.exists(build_path):
+            build_result = _build_with_cmake()
+            if not build_result:
+                return False
+        else:
+            print("Build directory exists, skipping build")
+
+        # Install
+        install_result = _install_with_cmake()
+        if not install_result:
             return False
 
         # run nucleus
         os.chmod('misc/run_nucleus', 0o775)
-        process = subprocess.run(['sudo', './misc/run_nucleus'],
-                                 check=True,
-                                 text=True,
-                                 stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE)
-        print("Successfully installed the nucleus from source")
+        print("Starting nucleus with run_nucleus script...")
+        try:
+            process = subprocess.run(['sudo', './misc/run_nucleus'],
+                                     check=True,
+                                     text=True)
+            print("Successfully installed the nucleus from source")
+        except subprocess.CalledProcessError as e:
+            print(f"FATAL: run_nucleus failed with exit code {e.returncode}")
+            print(f"stdout: {e.stdout}")
+            print(f"stderr: {e.stderr}")
+            raise Exception(
+                f"Greengrass setup failed: run_nucleus script failed")
+
+        # Wait for device to register with Greengrass V2
+        from GGTestUtils import sleep_with_log
+
+        # Read thing name from config
+        try:
+            with open('/etc/greengrass/config.yaml', 'r') as f:
+                config = yaml.safe_load(f)
+                thing_name = config['system']['thingName']
+        except Exception as e:
+            raise Exception(
+                f"FATAL: Could not read thing name from config: {e}")
+
+        gg_client = boto3.client('greengrassv2')
+
+        for attempt in range(30):    # Wait up to 5 minutes
+            try:
+                gg_client.get_core_device(coreDeviceThingName=thing_name)
+                print(
+                    f"Device {thing_name} successfully registered with Greengrass V2"
+                )
+                break
+            except gg_client.exceptions.ResourceNotFoundException:
+                sleep_with_log(
+                    10,
+                    f"waiting for device registration, attempt {attempt + 1}/30"
+                )
+        else:
+            raise Exception(
+                f"FATAL: Device {thing_name} failed to register with Greengrass after 5 minutes"
+            )
+        print("Successfully installed and started the nucleus from source")
 
     except Exception as e:
         print(f"Unexpected error: {e}")
@@ -118,11 +196,6 @@ def clean_up() -> bool:
     # Stop and disable services
     stop_result = _stop_and_disable_services()
     if not stop_result:
-        return False
-
-    # Remove aws-greengrass-lite
-    remove_ggl = _remove_dir("aws-greengrass-lite")
-    if not remove_ggl:
         return False
 
     # Remove several other directories
@@ -146,15 +219,12 @@ def clean_up() -> bool:
 # ===============================================
 # HELPER FUNCTIONS
 # ===============================================
-def _download_source(commit_id: str, max_retries=3) -> bool:
+def _download_source(commit_id: str, target_dir: str, max_retries=3) -> bool:
     url = f"https://github.com/aws-greengrass/aws-greengrass-lite/archive/{commit_id}.zip"
-    src_path = "./aws-greengrass-lite.zip"
-    extracted_folder = f"aws-greengrass-lite-{commit_id}"
-    target_folder = "aws-greengrass-lite"
-
-    if os.path.isdir(target_folder):
-        print("Please clean up before downloading the aws-greengrass-lite")
-        return False
+    src_path = os.path.join(target_dir, "aws-greengrass-lite.zip")
+    extracted_folder = os.path.join(target_dir,
+                                    f"aws-greengrass-lite-{commit_id}")
+    target_folder = os.path.join(target_dir, "aws-greengrass-lite")
 
     for attempt in range(max_retries):
         try:
@@ -171,7 +241,9 @@ def _download_source(commit_id: str, max_retries=3) -> bool:
             with open(src_path, 'wb') as f:
                 f.write(response.content)
 
-            if _unzip_file(src_path, '.'):
+            if _unzip_file(src_path, target_dir):
+                if os.path.exists(target_folder):
+                    shutil.rmtree(target_folder)
                 os.rename(extracted_folder, target_folder)
                 print("Successfully downloaded aws-greengrass-lite")
                 return True
@@ -208,13 +280,23 @@ def _install_build_dependencies() -> bool:
             "liburiparser-dev", "cgroup-tools"
         ]
 
-        # Update package list
-        update_command = ["sudo", "apt", "update"]
-        subprocess.run(update_command, check=True)
+        # Check which packages are missing
+        check_cmd = ["dpkg", "-l"] + packages
+        result = subprocess.run(check_cmd, capture_output=True, text=True)
 
-        # Install packages
-        install_command = ["sudo", "apt", "install", "-y"] + packages
-        subprocess.run(install_command, check=True)
+        missing_packages = []
+        for pkg in packages:
+            if pkg not in result.stdout or f"ii  {pkg}" not in result.stdout:
+                missing_packages.append(pkg)
+
+        if not missing_packages:
+            print("All dependencies already installed")
+            return True
+
+        # Update and install only missing packages
+        subprocess.run(["sudo", "apt", "update"], check=True)
+        subprocess.run(["sudo", "apt", "install", "-y"] + missing_packages,
+                       check=True)
 
         print("Successfully updated and installed dependencies")
         return True
@@ -283,38 +365,39 @@ def _check_user_exists(user: str) -> bool:
 
 
 def _build_with_cmake() -> bool:
-    original_dir = os.getcwd()
     try:
-        # CMake configure command
         cmake_cmd = [
             'cmake', '-B', 'build', '-D', 'CMAKE_INSTALL_PREFIX=/usr/local',
             '-D', 'CMAKE_BUILD_TYPE=MinSizeRel', '-D', 'CMAKE_BUILD_TYPE=Debug',
             '-DGGL_LOG_LEVEL=DEBUG'
         ]
-
         subprocess.run(cmake_cmd, check=True)
 
-        # Change the directory to build
-        os.chdir("build")
-        build_cmd = ['make', '-C', 'build', '-j$(nproc)']
-        subprocess.run(build_cmd, shell=True, check=True)
-        os.chdir(original_dir)
-
-        # Install command
-        install_cmd = ['sudo', 'make', '-C', 'build', 'install']
-        subprocess.run(install_cmd, check=True)
+        build_cmd = ['make', '-C', 'build', f'-j{os.cpu_count()}']
+        subprocess.run(build_cmd, check=True)
 
         print("Successfully completed the build process")
         return True
-
     except subprocess.CalledProcessError as e:
         print(f"Error during build process: {e}")
         return False
     except Exception as e:
         print(f"Unexpected error: {e}")
         return False
-    finally:
-        os.chdir(original_dir)
+
+
+def _install_with_cmake() -> bool:
+    try:
+        install_cmd = ['sudo', 'make', '-C', 'build', 'install']
+        subprocess.run(install_cmd, check=True)
+        print("Successfully completed the install process")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error during install process: {e}")
+        return False
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return False
 
 
 def _tes_setup(device_cert: str, private_key: str) -> bool:
@@ -341,7 +424,7 @@ def _tes_setup(device_cert: str, private_key: str) -> bool:
         return False
 
 
-def _modify_config(iot_client: client, thing_name: str, file_path: str,
+def _modify_config(iot_client: "client", thing_name: str, file_path: str,
                    group: str, user: str, region: str) -> bool:
 
     try:
@@ -449,10 +532,9 @@ def _remove_dir(dir: str) -> bool:
         if os.path.exists(dir):
             subprocess.run(['sudo', 'rm', '-rf', dir], check=True)
             print(f"Successfully removed {dir}")
-            return True
         else:
-            print(f"Error when removing directory: {dir} does not exist")
-            return False
+            print(f"Directory {dir} does not exist, skipping removal")
+        return True
     except subprocess.CalledProcessError as e:
         print(f"Error when removing directory: {str(e)}")
         return False

@@ -1,8 +1,10 @@
+ASAN
 awsiotsdk
 cbor
 clientv
 coreutils
 dggl
+dpkg
 getgrnam
 getpwnam
 ggconfigd
@@ -22,6 +24,7 @@ javax
 journalctl
 libsystemd
 libyaml
+LSAN
 mqtt
 mqttproxy
 murty
@@ -36,6 +39,7 @@ pyproject
 pytest
 remko
 tesd
+tmpfs
 venv
 virtualenv
 xeau

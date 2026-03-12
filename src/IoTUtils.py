@@ -11,10 +11,10 @@ JSON_FILE = "/tmp/aws-greengrass-testing-workspace/iot_setup_data.json"
 
 
 class IoTUtils():
-    _thing_name: str = None
 
-    def __init__(self, region: str):
+    def __init__(self, region: str, thing_name: str = None):
         self._region = region
+        self._thing_name = thing_name
         self._iot_client = client("iot", region_name=self._region)
         self._iam_client = client("iam", region_name=self._region)
         self._gg_client = client("greengrassv2", region_name=self._region)
@@ -23,6 +23,31 @@ class IoTUtils():
     @property
     def thing_name(self):
         return self._thing_name
+
+    def get_iot_endpoints(self) -> dict:
+        """Get IoT data and credential endpoints for this region."""
+        data_ep = self._iot_client.describe_endpoint(
+            endpointType="iot:Data-ATS")["endpointAddress"]
+        cred_ep = self._iot_client.describe_endpoint(
+            endpointType="iot:CredentialProvider")["endpointAddress"]
+        return {"iotDataEndpoint": data_ep, "iotCredEndpoint": cred_ep}
+
+    def provision_for_endpoint_switch(self, cert_pem: str,
+                                      role_alias_name: str):
+        """Provision IoT resources for an existing device in this
+        region. Registers the certificate PEM (without CA) and
+        creates thing, policy, role, and role alias."""
+        self._iot_client.create_thing(thingName=self._thing_name)
+        resp = self._iot_client.register_certificate_without_ca(
+            certificatePem=cert_pem, status='ACTIVE')
+        cert_arn = resp['certificateArn']
+        self._iot_client.attach_thing_principal(thingName=self._thing_name,
+                                                principal=cert_arn)
+        role_arn = self._create_iot_role()
+        role_alias_arn = self._create_role_alias(role_arn, role_alias_name)
+        self._attach_thing_policy(role_alias_arn, cert_arn,
+                                  "ggl-uat-thing-policy-dest")
+        print(f"Provisioned thing '{self._thing_name}' in {self._region}")
 
     def generate_random_id(self):
         return str(uuid.uuid4().hex)
@@ -304,8 +329,10 @@ class IoTUtils():
             print(f"Error creating role: {str(e)}")
             return None
 
-    def _create_role_alias(self, role_arn: str) -> str | None:
-        role_alias_name = "ggl-uat-role-alias"
+    def _create_role_alias(
+            self,
+            role_arn: str,
+            role_alias_name: str = "ggl-uat-role-alias") -> str | None:
 
         try:
             response = self._iot_client.describe_role_alias(
@@ -325,8 +352,10 @@ class IoTUtils():
             print(f"Error creating role alias: {str(e)}")
             return None
 
-    def _attach_thing_policy(self, role_alias_arn: str, cert_arn: str):
-        iot_policy_name = "ggl-uat-thing-policy"
+    def _attach_thing_policy(self,
+                             role_alias_arn: str,
+                             cert_arn: str,
+                             policy_name: str = "ggl-uat-thing-policy"):
 
         policy_document = {
             "Version":
@@ -348,13 +377,12 @@ class IoTUtils():
         }
 
         try:
-            self._iot_client.get_policy(policyName=iot_policy_name)
-            print(f"Policy '{iot_policy_name}' already exists.")
+            self._iot_client.get_policy(policyName=policy_name)
+            print(f"Policy '{policy_name}' already exists.")
 
         except self._iot_client.exceptions.ResourceNotFoundException:
             self._iot_client.create_policy(
-                policyName=iot_policy_name,
+                policyName=policy_name,
                 policyDocument=json.dumps(policy_document))
 
-        self._iot_client.attach_policy(policyName=iot_policy_name,
-                                       target=cert_arn)
+        self._iot_client.attach_policy(policyName=policy_name, target=cert_arn)

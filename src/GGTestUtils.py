@@ -454,6 +454,33 @@ class GGTestUtils:
 
         return "TIMEOUT"
 
+    def wait_for_iot_job_status(
+            self, timeout: float, deployment_id: str,
+            thing_name: str) -> Literal['SUCCEEDED', 'FAILED', 'TIMEOUT']:
+        """Poll IoT Job execution status for a deployment."""
+        deployment = self._ggClient.get_deployment(deploymentId=deployment_id)
+        iot_job_id = deployment.get("iotJobId")
+        if not iot_job_id:
+            print(f"No iotJobId found for deployment {deployment_id}")
+            return "FAILED"
+
+        while timeout > 0:
+            try:
+                resp = self._iotClient.describe_job_execution(
+                    jobId=iot_job_id, thingName=thing_name)
+                status = resp["execution"]["status"]
+                if status == "SUCCEEDED":
+                    return "SUCCEEDED"
+                if status in ("FAILED", "REJECTED", "REMOVED", "CANCELED"):
+                    print(f"IoT Job {iot_job_id} status: {status}")
+                    return "FAILED"
+            except Exception as e:
+                print(f"Error checking job status: {e}")
+            time.sleep(1)
+            timeout -= 1
+
+        return "TIMEOUT"
+
     def _upload_files_to_s3(self,
                             files: Sequence[os.PathLike | str],
                             bucket_name: str,
@@ -802,23 +829,28 @@ class GGTestUtils:
         self._ggServiceList = []
 
     def wait_ggcore_device_status(
-            self, timeout: int | float, thing_group_name,
-            desired_health: str) -> Optional[CoreDeviceStatusType]:
-        things_in_group = self._iotClient.list_things_in_thing_group(
-            thingGroupName=thing_group_name,
-            recursive=False,
-            nextToken="",
-            maxResults=100,
-        )
+            self,
+            timeout: int | float,
+            thing_group_name,
+            desired_health: str,
+            thing_name: str = None) -> Optional[CoreDeviceStatusType]:
+        if thing_name is None:
+            things_in_group = self._iotClient.list_things_in_thing_group(
+                thingGroupName=thing_group_name,
+                recursive=False,
+                nextToken="",
+                maxResults=100,
+            )
 
-        # Make sure that there is only one thing in the group.
-        if len(things_in_group["things"]) != 1:
-            print("The number of things in the thing-group must be 1.")
-            return False
+            # Make sure that there is only one thing in the group.
+            if len(things_in_group["things"]) != 1:
+                print("The number of things in the thing-group must be 1.")
+                return False
+            thing_name = things_in_group["things"][0]
 
         while timeout > 0:
             return_val = self._ggClient.get_core_device(
-                coreDeviceThingName=things_in_group["things"][0])
+                coreDeviceThingName=thing_name)
 
             if return_val is None or return_val["status"] != desired_health:
                 time.sleep(1)
@@ -875,3 +907,39 @@ class GGTestUtils:
             RECIPE_DIR) / f"{component_name}-{component_version}.yaml"
         print(f"Checking if file {recipe_path} exists")
         return recipe_path.exists()
+
+    def get_nucleus_lite_version(self, thing_name: str) -> str:
+        """Get installed NucleusLite version from core device."""
+        device = self._ggClient.get_core_device(coreDeviceThingName=thing_name)
+        version = device.get("coreVersion")
+        if not version:
+            raise RuntimeError("coreVersion not found for core device")
+        return version
+
+    def create_nucleus_lite_component(self, thing_name: str) -> str:
+        """Create a dummy aws.greengrass.NucleusLite component
+        matching the version installed on the device.
+
+        Returns the component version string. The component ARN
+        is tracked for cleanup.
+        """
+        version = self.get_nucleus_lite_version(thing_name)
+        recipe_path = os.path.join("components", "aws.greengrass.NucleusLite",
+                                   "recipe", "aws.greengrass.NucleusLite.yaml")
+        with open(recipe_path, "r") as f:
+            recipe_content = f.read()
+        recipe_content = recipe_content.replace("$componentVersion$", version)
+        recipe_yaml = yaml.safe_load(recipe_content)
+        recipe = json.dumps(recipe_yaml)
+        try:
+            resp = self._ggClient.create_component_version(inlineRecipe=recipe)
+        except self._ggClient.exceptions.ConflictException:
+            print("aws.greengrass.NucleusLite component already exists")
+            arn = (f"arn:aws:greengrass:{self._region}"
+                   f":{self._account}:components"
+                   f":aws.greengrass.NucleusLite:versions:{version}")
+            self._ggComponentToDeleteArn.append(arn)
+            return version
+        print(f"Uploaded NucleusLite component: {resp['arn']}")
+        self._ggComponentToDeleteArn.append(resp["arn"])
+        return version

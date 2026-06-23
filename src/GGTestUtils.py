@@ -6,6 +6,7 @@ import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 from botocore.config import Config
 import time
+import random
 import logging
 import subprocess
 from types_boto3_greengrassv2 import GreengrassV2Client
@@ -26,13 +27,50 @@ RECIPE_DIR = "/var/lib/greengrass/packages/recipes"
 THROTTLE_RETRY_CONFIG = Config(retries={"max_attempts": 10, "mode": "adaptive"})
 
 # Exponential backoff bounds for deployment poll loop (seconds)
-INITIAL_POLL_INTERVAL = 2  # start polling every 2s instead of 1s
-MAX_POLL_INTERVAL = 15  # cap backoff at 15s to stay responsive
-MAX_CONSECUTIVE_DEPLOYMENT_ERRORS = 3  # consecutive failed status checks before failing loudly
+INITIAL_POLL_INTERVAL = 2    # start polling every 2s instead of 1s
+MAX_POLL_INTERVAL = 15    # cap backoff at 15s to stay responsive
+MAX_CONSECUTIVE_DEPLOYMENT_ERRORS = 3    # consecutive failed status checks before failing loudly
 
 # Delay between destructive teardown calls to ease IoT Jobs
 # DELETION_IN_PROGRESS concurrency limits.
-TEARDOWN_CALL_DELAY = 0.5  # seconds between destructive teardown calls to ease IoT Jobs DELETION_IN_PROGRESS limits
+TEARDOWN_CALL_DELAY = 0.5    # seconds between destructive teardown calls to ease IoT Jobs DELETION_IN_PROGRESS limits
+
+# Retryable throttling error codes from AWS APIs.
+_THROTTLE_CODES = frozenset({
+    "ThrottlingException",
+    "Throttling",
+    "ThrottledException",
+    "TooManyRequestsException",
+    "RequestLimitExceeded",
+    "LimitExceededException",
+})
+
+
+def _retry_on_throttle(func, *, attempts=3, base_delay=1.0, cap=10.0):
+    """Retry func() on throttling/transient errors with full-jitter backoff.
+
+    Non-throttle ClientErrors (e.g. ResourceNotFoundException) re-raise immediately.
+    """
+    for attempt in range(attempts):
+        try:
+            return func()
+        except ClientError as e:
+            code = e.response["Error"].get("Code", "")
+            if code not in _THROTTLE_CODES or attempt == attempts - 1:
+                raise
+            delay = random.uniform(0, min(base_delay * 2**attempt, cap))
+            print(
+                f"  Throttled ({code}), retry {attempt + 1}/{attempts} after {delay:.1f}s"
+            )
+            time.sleep(delay)
+        except BotoCoreError:
+            if attempt == attempts - 1:
+                raise
+            delay = random.uniform(0, min(base_delay * 2**attempt, cap))
+            print(
+                f"  Transient error, retry {attempt + 1}/{attempts} after {delay:.1f}s"
+            )
+            time.sleep(delay)
 
 
 def sleep_with_log(seconds: int, reason: str = ""):
@@ -70,9 +108,15 @@ class GGTestUtils:
         self._account = account
         self._bucket = bucket
         self._cli_bin_path = cli_bin_path
-        self._ggClient = boto3.client("greengrassv2", region_name=self._region, config=THROTTLE_RETRY_CONFIG)
-        self._iotClient = boto3.client("iot", region_name=self._region, config=THROTTLE_RETRY_CONFIG)
-        self._s3Client = boto3.client("s3", region_name=self._region, config=THROTTLE_RETRY_CONFIG)
+        self._ggClient = boto3.client("greengrassv2",
+                                      region_name=self._region,
+                                      config=THROTTLE_RETRY_CONFIG)
+        self._iotClient = boto3.client("iot",
+                                       region_name=self._region,
+                                       config=THROTTLE_RETRY_CONFIG)
+        self._s3Client = boto3.client("s3",
+                                      region_name=self._region,
+                                      config=THROTTLE_RETRY_CONFIG)
         self._ggComponentToDeleteArn = []
         self._component_random_ids = {
         }    # Track random_id per component-version
@@ -202,7 +246,9 @@ class GGTestUtils:
             }
 
         except (ClientError, BotoCoreError) as e:
-            if isinstance(e, ClientError) and e.response["Error"]["Code"] == "ResourceNotFoundException":
+            if isinstance(
+                    e, ClientError
+            ) and e.response["Error"]["Code"] == "ResourceNotFoundException":
                 # Benign: deployment not queryable yet (eventual consistency).
                 print(f"Deployment {deployment_id} not found")
                 return None
@@ -382,13 +428,13 @@ class GGTestUtils:
     def wait_for_deployment_till_timeout(
             self, timeout: float,
             deployment_id: str) -> Literal['SUCCEEDED', 'FAILED', 'TIMEOUT']:
-        poll_interval = INITIAL_POLL_INTERVAL  # exponential backoff starting point
-        consecutive_errors = 0  # consecutive failed status checks (e.g. throttling)
+        poll_interval = INITIAL_POLL_INTERVAL    # exponential backoff starting point
+        consecutive_errors = 0    # consecutive failed status checks (e.g. throttling)
         while timeout > 0:
             try:
                 result = self._check_greengrass_group_deployment_status(
                     deployment_id)
-                consecutive_errors = 0  # a clean call resets the counter
+                consecutive_errors = 0    # a clean call resets the counter
             except (ClientError, BotoCoreError) as e:
                 # The status check surfaced a real API error (e.g. a
                 # ThrottlingException that survived adaptive retries). Do NOT
@@ -402,11 +448,12 @@ class GGTestUtils:
                 if consecutive_errors >= MAX_CONSECUTIVE_DEPLOYMENT_ERRORS:
                     print(
                         f"Persistent API errors checking deployment "
-                        f"{deployment_id}; failing instead of silently timing out.")
+                        f"{deployment_id}; failing instead of silently timing out."
+                    )
                     return "FAILED"
                 sleep_for = min(poll_interval, timeout)
-                sleep_with_log(
-                    sleep_for, "backing off after deployment status error")
+                sleep_with_log(sleep_for,
+                               "backing off after deployment status error")
                 timeout -= sleep_for
                 poll_interval = min(poll_interval * 2, MAX_POLL_INTERVAL)
                 continue
@@ -547,7 +594,8 @@ class GGTestUtils:
                     print(f"{'='*60}\n")
                     return "FAILED"
             except (ClientError, BotoCoreError) as e:
-                if isinstance(e, ClientError) and e.response["Error"]["Code"] == "ResourceNotFoundException":
+                if isinstance(e, ClientError) and e.response["Error"][
+                        "Code"] == "ResourceNotFoundException":
                     # Benign: job execution not queryable yet.
                     pass
                 else:
@@ -557,10 +605,13 @@ class GGTestUtils:
                         f"({consecutive_errors}/{MAX_CONSECUTIVE_DEPLOYMENT_ERRORS}) "
                         f"for {iot_job_id}: {e}")
                     if consecutive_errors >= MAX_CONSECUTIVE_DEPLOYMENT_ERRORS:
-                        print(f"Persistent API errors checking IoT job {iot_job_id}; failing.")
+                        print(
+                            f"Persistent API errors checking IoT job {iot_job_id}; failing."
+                        )
                         return "FAILED"
                     sleep_for = min(poll_interval, timeout)
-                    sleep_with_log(sleep_for, "backing off after iot job status error")
+                    sleep_with_log(sleep_for,
+                                   "backing off after iot job status error")
                     timeout -= sleep_for
                     poll_interval = min(poll_interval * 2, MAX_POLL_INTERVAL)
                     continue
@@ -897,7 +948,8 @@ class GGTestUtils:
                 self._ggClient.delete_component(arn=componentArn)
             except Exception as e:
                 logging.warning(
-                    f'Failed to delete component {componentArn} from configured test account: {e}')
+                    f'Failed to delete component {componentArn} from configured test account: {e}'
+                )
             time.sleep(TEARDOWN_CALL_DELAY)
 
         # Delete S3 artifacts for each component random_id
@@ -941,11 +993,18 @@ class GGTestUtils:
                 print(
                     f"Cleaning up deployment: {deployment}, with thing group arn: {thing_group_arn}"
                 )
-                self._ggClient.cancel_deployment(deploymentId=deployment)
+                _retry_on_throttle(lambda d=deployment: self._ggClient.
+                                   cancel_deployment(deploymentId=d))
             except Exception as e:
                 print(f"Failed to cancel deployment {deployment}: {e}")
             try:
-                self._ggClient.delete_deployment(deploymentId=deployment)
+                # Highest-contention call — hits IoT Jobs DELETION_IN_PROGRESS 10-cap;
+                # use extended budget to wait out slot drains (30-60s).
+                _retry_on_throttle(lambda d=deployment: self._ggClient.
+                                   delete_deployment(deploymentId=d),
+                                   attempts=5,
+                                   base_delay=2.0,
+                                   cap=30.0)
             except Exception as e:
                 print(f"Failed to delete deployment {deployment}: {e}")
             time.sleep(TEARDOWN_CALL_DELAY)
@@ -987,7 +1046,8 @@ class GGTestUtils:
                     coreDeviceThingName=thing_name)
                 consecutive_errors = 0
             except (ClientError, BotoCoreError) as e:
-                if isinstance(e, ClientError) and e.response["Error"]["Code"] == "ResourceNotFoundException":
+                if isinstance(e, ClientError) and e.response["Error"][
+                        "Code"] == "ResourceNotFoundException":
                     # Benign: core device not registered yet.
                     return_val = None
                 else:
@@ -997,10 +1057,13 @@ class GGTestUtils:
                         f"({consecutive_errors}/{MAX_CONSECUTIVE_DEPLOYMENT_ERRORS}) "
                         f"for {thing_name}: {e}")
                     if consecutive_errors >= MAX_CONSECUTIVE_DEPLOYMENT_ERRORS:
-                        print(f"Persistent API errors checking core device {thing_name}; failing.")
+                        print(
+                            f"Persistent API errors checking core device {thing_name}; failing."
+                        )
                         return False
                     sleep_for = min(poll_interval, timeout)
-                    sleep_with_log(sleep_for, "backing off after core device status error")
+                    sleep_with_log(
+                        sleep_for, "backing off after core device status error")
                     timeout -= sleep_for
                     poll_interval = min(poll_interval * 2, MAX_POLL_INTERVAL)
                     continue

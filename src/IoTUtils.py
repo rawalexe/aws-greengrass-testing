@@ -16,12 +16,16 @@ JSON_FILE = "/tmp/aws-greengrass-testing-workspace/iot_setup_data.json"
 # IoT Core / GGv2 API throttling under parallel UAT load.
 THROTTLE_RETRY_CONFIG = Config(retries={"max_attempts": 10, "mode": "adaptive"})
 
-TEARDOWN_CALL_DELAY = 0.5  # seconds between destructive teardown calls to ease IoT Jobs DELETION_IN_PROGRESS limits
+TEARDOWN_CALL_DELAY = 0.5    # seconds between destructive teardown calls to ease IoT Jobs DELETION_IN_PROGRESS limits
 
 # Retryable throttling error codes from AWS APIs.
 _THROTTLE_CODES = frozenset({
-    "ThrottlingException", "Throttling", "ThrottledException",
-    "TooManyRequestsException", "RequestLimitExceeded", "LimitExceededException",
+    "ThrottlingException",
+    "Throttling",
+    "ThrottledException",
+    "TooManyRequestsException",
+    "RequestLimitExceeded",
+    "LimitExceededException",
 })
 
 
@@ -36,15 +40,19 @@ def _retry_on_throttle(func, *, attempts=3, base_delay=1.0, cap=10.0):
         except ClientError as e:
             code = e.response["Error"].get("Code", "")
             if code not in _THROTTLE_CODES or attempt == attempts - 1:
-                raise  # non-retryable or final attempt — propagate
-            delay = random.uniform(0, min(base_delay * 2 ** attempt, cap))
-            print(f"  Throttled ({code}), retry {attempt + 1}/{attempts} after {delay:.1f}s")
+                raise    # non-retryable or final attempt — propagate
+            delay = random.uniform(0, min(base_delay * 2**attempt, cap))
+            print(
+                f"  Throttled ({code}), retry {attempt + 1}/{attempts} after {delay:.1f}s"
+            )
             sleep(delay)
         except (BotoCoreError, botocore.exceptions.ConnectionError):
             if attempt == attempts - 1:
                 raise
-            delay = random.uniform(0, min(base_delay * 2 ** attempt, cap))
-            print(f"  Transient error, retry {attempt + 1}/{attempts} after {delay:.1f}s")
+            delay = random.uniform(0, min(base_delay * 2**attempt, cap))
+            print(
+                f"  Transient error, retry {attempt + 1}/{attempts} after {delay:.1f}s"
+            )
             sleep(delay)
 
 
@@ -53,9 +61,15 @@ class IoTUtils():
     def __init__(self, region: str, thing_name: str = None):
         self._region = region
         self._thing_name = thing_name
-        self._iot_client = client("iot", region_name=self._region, config=THROTTLE_RETRY_CONFIG)
-        self._iam_client = client("iam", region_name=self._region, config=THROTTLE_RETRY_CONFIG)
-        self._gg_client = client("greengrassv2", region_name=self._region, config=THROTTLE_RETRY_CONFIG)
+        self._iot_client = client("iot",
+                                  region_name=self._region,
+                                  config=THROTTLE_RETRY_CONFIG)
+        self._iam_client = client("iam",
+                                  region_name=self._region,
+                                  config=THROTTLE_RETRY_CONFIG)
+        self._gg_client = client("greengrassv2",
+                                 region_name=self._region,
+                                 config=THROTTLE_RETRY_CONFIG)
         self._thing_groups = []
         self._provisioned_role_name = None
         self._provisioned_role_alias = None
@@ -226,7 +240,9 @@ class IoTUtils():
                         self._gg_client.cancel_deployment(
                             deploymentId=deployment['deploymentId'])
                     except Exception as e:
-                        print(f"Failed to cancel deployment {deployment['deploymentId']}: {e}")
+                        print(
+                            f"Failed to cancel deployment {deployment['deploymentId']}: {e}"
+                        )
                     sleep(TEARDOWN_CALL_DELAY)
                 print(f"Cancelled all deployments")
 
@@ -236,9 +252,11 @@ class IoTUtils():
 
         # Delete the core device
         try:
-            _retry_on_throttle(
-                lambda: self._gg_client.delete_core_device(
-                    coreDeviceThingName=self._thing_name))
+            _retry_on_throttle(lambda: self._gg_client.delete_core_device(
+                coreDeviceThingName=self._thing_name),
+                               attempts=5,
+                               base_delay=2.0,
+                               cap=30.0)
             print(f"Deleted Greengrass core device '{self._thing_name}'")
         except Exception as e:
             print(f"Failed to delete Greengrass core device: {str(e)}")
@@ -267,8 +285,8 @@ class IoTUtils():
                             policyName=policy['policyName'], target=principal)
 
                     # Detach certificate from thing
-                    self._iot_client.detach_thing_principal(thingName=thing_name,
-                                                            principal=principal)
+                    self._iot_client.detach_thing_principal(
+                        thingName=thing_name, principal=principal)
 
                     # Update certificate to INACTIVE
                     self._iot_client.update_certificate(certificateId=cert_id,
@@ -278,12 +296,17 @@ class IoTUtils():
                     self._iot_client.delete_certificate(certificateId=cert_id,
                                                         forceDelete=True)
                 except Exception as e:
-                    print(f"Error cleaning up cert {principal} for thing '{thing_name}': {e}")
+                    print(
+                        f"Error cleaning up cert {principal} for thing '{thing_name}': {e}"
+                    )
                 sleep(TEARDOWN_CALL_DELAY)
 
             # Finally, delete the thing
             _retry_on_throttle(
-                lambda: self._iot_client.delete_thing(thingName=thing_name))
+                lambda: self._iot_client.delete_thing(thingName=thing_name),
+                attempts=5,
+                base_delay=2.0,
+                cap=30.0)
 
             print(
                 f"Successfully deleted thing '{thing_name}' and its associated certificates"

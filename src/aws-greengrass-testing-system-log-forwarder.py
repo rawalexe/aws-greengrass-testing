@@ -8,7 +8,11 @@ from src.SystemInterface import SystemInterface
 
 import time
 import boto3
+from botocore.config import Config
 import src.GGLSetup as ggl_setup
+
+# Adaptive retry config: absorb CloudWatch Logs API throttling under parallel UAT load.
+THROTTLE_RETRY_CONFIG = Config(retries={"max_attempts": 10, "mode": "adaptive"})
 
 
 @fixture(scope="function")
@@ -55,7 +59,7 @@ def system_interface() -> Generator[SystemInterface, None, None]:
 @fixture(scope="function")
 def cloudwatch_cleanup(request) -> Generator[None, None, None]:
     region = request.config.getoption("--region")
-    logs_client = boto3.client('logs', region_name=region)
+    logs_client = boto3.client('logs', region_name=region, config=THROTTLE_RETRY_CONFIG)
 
     # Store cleanup info with unique log group per test
     import time
@@ -243,7 +247,7 @@ def test_SLF_1_T2(iot_obj: IoTUtils, cloudwatch_cleanup,
     print(f"Waiting for logs to appear in CloudWatch...")
 
     # Check CloudWatch logs for system logs
-    logs_client = boto3.client('logs', region_name=gg_util_obj._region)
+    logs_client = boto3.client('logs', region_name=gg_util_obj._region, config=THROTTLE_RETRY_CONFIG)
     log_group_name = cloudwatch_cleanup['log_group_name']
     log_stream_name = iot_obj.thing_name
 
@@ -331,7 +335,7 @@ def test_SLF_1_T3(iot_obj: IoTUtils, cloudwatch_cleanup,
     print(f"Waiting for logs to appear in CloudWatch...")
 
     # Verify the custom log group was created by SystemLogForwarder
-    logs_client = boto3.client('logs', region_name=gg_util_obj._region)
+    logs_client = boto3.client('logs', region_name=gg_util_obj._region, config=THROTTLE_RETRY_CONFIG)
 
     try:
         response = logs_client.describe_log_groups(
@@ -414,7 +418,7 @@ def test_SLF_1_T4(iot_obj: IoTUtils, cloudwatch_cleanup,
     print(f"Waiting for logs to appear in CloudWatch...")
 
     # Verify the custom log stream was created by SystemLogForwarder
-    logs_client = boto3.client('logs', region_name=gg_util_obj._region)
+    logs_client = boto3.client('logs', region_name=gg_util_obj._region, config=THROTTLE_RETRY_CONFIG)
 
     try:
         response = logs_client.describe_log_streams(

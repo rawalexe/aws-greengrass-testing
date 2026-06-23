@@ -3,7 +3,8 @@ import os
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 from uuid import uuid1
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, BotoCoreError
+from botocore.config import Config
 import time
 import logging
 import subprocess
@@ -19,6 +20,19 @@ from typing import Sequence, Optional, Any, Dict, List, Literal, Optional, Seque
 
 S3_ARTIFACT_DIR = "artifacts"
 RECIPE_DIR = "/var/lib/greengrass/packages/recipes"
+
+# Adaptive retry config: adds client-side rate limiting/backoff to absorb
+# IoT Core / GGv2 API throttling under parallel UAT load.
+THROTTLE_RETRY_CONFIG = Config(retries={"max_attempts": 10, "mode": "adaptive"})
+
+# Exponential backoff bounds for deployment poll loop (seconds)
+INITIAL_POLL_INTERVAL = 2  # start polling every 2s instead of 1s
+MAX_POLL_INTERVAL = 15  # cap backoff at 15s to stay responsive
+MAX_CONSECUTIVE_DEPLOYMENT_ERRORS = 3  # consecutive failed status checks before failing loudly
+
+# Delay between destructive teardown calls to ease IoT Jobs
+# DELETION_IN_PROGRESS concurrency limits.
+TEARDOWN_CALL_DELAY = 0.5  # seconds between destructive teardown calls to ease IoT Jobs DELETION_IN_PROGRESS limits
 
 
 def sleep_with_log(seconds: int, reason: str = ""):
@@ -56,9 +70,9 @@ class GGTestUtils:
         self._account = account
         self._bucket = bucket
         self._cli_bin_path = cli_bin_path
-        self._ggClient = boto3.client("greengrassv2", region_name=self._region)
-        self._iotClient = boto3.client("iot", region_name=self._region)
-        self._s3Client = boto3.client("s3", region_name=self._region)
+        self._ggClient = boto3.client("greengrassv2", region_name=self._region, config=THROTTLE_RETRY_CONFIG)
+        self._iotClient = boto3.client("iot", region_name=self._region, config=THROTTLE_RETRY_CONFIG)
+        self._s3Client = boto3.client("s3", region_name=self._region, config=THROTTLE_RETRY_CONFIG)
         self._ggComponentToDeleteArn = []
         self._component_random_ids = {
         }    # Track random_id per component-version
@@ -103,6 +117,10 @@ class GGTestUtils:
                 thingGroupName=thing_group_name)
             things = [thing for thing in response.get("things", [])]
             return things
+        except (ClientError, BotoCoreError):
+            # Surface AWS errors (incl. persistent throttling) so callers fail
+            # loudly instead of returning None and crashing on iteration.
+            raise
         except Exception as e:
             print(f"Error retrieving things in thing group: {e}")
             return None
@@ -133,6 +151,11 @@ class GGTestUtils:
                 # If this is a thing instead of a thing group.
                 things_list.append(target_arn.split("/")[-1])
 
+            if things_list is None:
+                # Defensive: a non-AWS error path returned None; treat as no
+                # things rather than crashing on `for thing in things_list`.
+                things_list = []
+
             statistics_list = []
 
             for thing in things_list:
@@ -160,6 +183,11 @@ class GGTestUtils:
                         if statistic:
                             statistics_list.append({thing: statistic})
 
+                except (ClientError, BotoCoreError):
+                    # Surface ALL AWS SDK errors (throttling, auth, connection,
+                    # timeouts, etc.) to the caller's fail-loud counter instead
+                    # of masking them as "stats not ready yet".
+                    raise
                 except Exception as e:
                     elapsed = int(time.time() - start_time)
                     print(
@@ -173,12 +201,17 @@ class GGTestUtils:
                 "statistics": statistics_list,
             }
 
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "ResourceNotFoundException":
+        except (ClientError, BotoCoreError) as e:
+            if isinstance(e, ClientError) and e.response["Error"]["Code"] == "ResourceNotFoundException":
+                # Benign: deployment not queryable yet (eventual consistency).
                 print(f"Deployment {deployment_id} not found")
-            else:
-                print(f"An error occurred: {e}")
-            return None
+                return None
+            # Previously ALL other ClientErrors (incl. ThrottlingException) were
+            # swallowed via `return None`, which the caller read as "not ready
+            # yet" -> silent timeout / false PASS. Surface it so the caller can
+            # fail loudly on persistent errors.
+            print(f"An error occurred: {e}")
+            raise
 
     def create_local_deployment(self,
                                 artifacts_dir,
@@ -349,9 +382,34 @@ class GGTestUtils:
     def wait_for_deployment_till_timeout(
             self, timeout: float,
             deployment_id: str) -> Literal['SUCCEEDED', 'FAILED', 'TIMEOUT']:
+        poll_interval = INITIAL_POLL_INTERVAL  # exponential backoff starting point
+        consecutive_errors = 0  # consecutive failed status checks (e.g. throttling)
         while timeout > 0:
-            result = self._check_greengrass_group_deployment_status(
-                deployment_id)
+            try:
+                result = self._check_greengrass_group_deployment_status(
+                    deployment_id)
+                consecutive_errors = 0  # a clean call resets the counter
+            except (ClientError, BotoCoreError) as e:
+                # The status check surfaced a real API error (e.g. a
+                # ThrottlingException that survived adaptive retries). Do NOT
+                # silently keep polling: count it and fail loudly if it persists,
+                # so a throttled run goes RED instead of false-passing.
+                consecutive_errors += 1
+                print(
+                    f"Deployment status check failed "
+                    f"({consecutive_errors}/{MAX_CONSECUTIVE_DEPLOYMENT_ERRORS}) "
+                    f"for {deployment_id}: {e}")
+                if consecutive_errors >= MAX_CONSECUTIVE_DEPLOYMENT_ERRORS:
+                    print(
+                        f"Persistent API errors checking deployment "
+                        f"{deployment_id}; failing instead of silently timing out.")
+                    return "FAILED"
+                sleep_for = min(poll_interval, timeout)
+                sleep_with_log(
+                    sleep_for, "backing off after deployment status error")
+                timeout -= sleep_for
+                poll_interval = min(poll_interval * 2, MAX_POLL_INTERVAL)
+                continue
             if result:
                 if result["statistics"]:
                     for entry in result["statistics"]:
@@ -449,8 +507,11 @@ class GGTestUtils:
                                     else:
                                         pass
 
-            time.sleep(1)
-            timeout -= 1
+            # Exponential backoff: reduce API pressure under parallel UAT load
+            sleep_for = min(poll_interval, timeout)
+            sleep_with_log(sleep_for, "polling deployment status")
+            timeout -= sleep_for
+            poll_interval = min(poll_interval * 2, MAX_POLL_INTERVAL)
 
         return "TIMEOUT"
 
@@ -464,10 +525,13 @@ class GGTestUtils:
             print(f"No iotJobId found for deployment {deployment_id}")
             return "FAILED"
 
+        poll_interval = INITIAL_POLL_INTERVAL
+        consecutive_errors = 0
         while timeout > 0:
             try:
                 resp = self._iotClient.describe_job_execution(
                     jobId=iot_job_id, thingName=thing_name)
+                consecutive_errors = 0
                 execution = resp["execution"]
                 status = execution["status"]
                 if status == "SUCCEEDED":
@@ -482,10 +546,29 @@ class GGTestUtils:
                     self._dump_device_logs()
                     print(f"{'='*60}\n")
                     return "FAILED"
-            except Exception as e:
-                print(f"Error checking job status: {e}")
-            time.sleep(1)
-            timeout -= 1
+            except (ClientError, BotoCoreError) as e:
+                if isinstance(e, ClientError) and e.response["Error"]["Code"] == "ResourceNotFoundException":
+                    # Benign: job execution not queryable yet.
+                    pass
+                else:
+                    consecutive_errors += 1
+                    print(
+                        f"IoT job status check failed "
+                        f"({consecutive_errors}/{MAX_CONSECUTIVE_DEPLOYMENT_ERRORS}) "
+                        f"for {iot_job_id}: {e}")
+                    if consecutive_errors >= MAX_CONSECUTIVE_DEPLOYMENT_ERRORS:
+                        print(f"Persistent API errors checking IoT job {iot_job_id}; failing.")
+                        return "FAILED"
+                    sleep_for = min(poll_interval, timeout)
+                    sleep_with_log(sleep_for, "backing off after iot job status error")
+                    timeout -= sleep_for
+                    poll_interval = min(poll_interval * 2, MAX_POLL_INTERVAL)
+                    continue
+
+            sleep_for = min(poll_interval, timeout)
+            sleep_with_log(sleep_for, "polling iot job status")
+            timeout -= sleep_for
+            poll_interval = min(poll_interval * 2, MAX_POLL_INTERVAL)
 
         return "TIMEOUT"
 
@@ -809,12 +892,13 @@ class GGTestUtils:
 
     def cleanup(self) -> None:
         for componentArn in self._ggComponentToDeleteArn:
+            # Isolate each delete so one failure doesn't skip the rest.
             try:
                 self._ggClient.delete_component(arn=componentArn)
-            except:
+            except Exception as e:
                 logging.warning(
-                    f'Failed to delete component {componentArn} from configured test account.'
-                )
+                    f'Failed to delete component {componentArn} from configured test account: {e}')
+            time.sleep(TEARDOWN_CALL_DELAY)
 
         # Delete S3 artifacts for each component random_id
         for random_id in set(self._component_random_ids.values()):
@@ -852,14 +936,19 @@ class GGTestUtils:
                 print(e)
 
         for (deployment, thing_group_arn) in self._ggDeploymentToThingNameList:
+            # Isolate each deployment cancel+delete so one failure continues to the next.
             try:
                 print(
                     f"Cleaning up deployment: {deployment}, with thing group arn: {thing_group_arn}"
                 )
                 self._ggClient.cancel_deployment(deploymentId=deployment)
+            except Exception as e:
+                print(f"Failed to cancel deployment {deployment}: {e}")
+            try:
                 self._ggClient.delete_deployment(deploymentId=deployment)
             except Exception as e:
-                print(e)
+                print(f"Failed to delete deployment {deployment}: {e}")
+            time.sleep(TEARDOWN_CALL_DELAY)
 
         # Reset the lists.
         self._ggComponentToDeleteArn = []
@@ -890,13 +979,37 @@ class GGTestUtils:
                 return False
             thing_name = things_in_group["things"][0]
 
+        poll_interval = INITIAL_POLL_INTERVAL
+        consecutive_errors = 0
         while timeout > 0:
-            return_val = self._ggClient.get_core_device(
-                coreDeviceThingName=thing_name)
+            try:
+                return_val = self._ggClient.get_core_device(
+                    coreDeviceThingName=thing_name)
+                consecutive_errors = 0
+            except (ClientError, BotoCoreError) as e:
+                if isinstance(e, ClientError) and e.response["Error"]["Code"] == "ResourceNotFoundException":
+                    # Benign: core device not registered yet.
+                    return_val = None
+                else:
+                    consecutive_errors += 1
+                    print(
+                        f"Core device status check failed "
+                        f"({consecutive_errors}/{MAX_CONSECUTIVE_DEPLOYMENT_ERRORS}) "
+                        f"for {thing_name}: {e}")
+                    if consecutive_errors >= MAX_CONSECUTIVE_DEPLOYMENT_ERRORS:
+                        print(f"Persistent API errors checking core device {thing_name}; failing.")
+                        return False
+                    sleep_for = min(poll_interval, timeout)
+                    sleep_with_log(sleep_for, "backing off after core device status error")
+                    timeout -= sleep_for
+                    poll_interval = min(poll_interval * 2, MAX_POLL_INTERVAL)
+                    continue
 
             if return_val is None or return_val["status"] != desired_health:
-                time.sleep(1)
-                timeout -= 1
+                sleep_for = min(poll_interval, timeout)
+                sleep_with_log(sleep_for, "polling core device status")
+                timeout -= sleep_for
+                poll_interval = min(poll_interval * 2, MAX_POLL_INTERVAL)
             else:
                 return True
 

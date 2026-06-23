@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 from uuid import uuid1
 from boto3 import client
 import boto3
+from botocore.config import Config
 import time
 import logging
 import yaml
@@ -27,6 +28,10 @@ PRIVATE_PATH = "/var/lib/greengrass/private.pem.key"
 CA_PATH = "/var/lib/greengrass/AmazonRootCA1.pem"
 JSON_FILE = "/tmp/aws-greengrass-testing-workspace/iot_setup_data.json"
 WORKSPACE_DIR = "/tmp/aws-greengrass-testing-workspace"
+
+# Adaptive retry config: adds client-side rate limiting/backoff to absorb
+# IoT Core / GGv2 API throttling under parallel UAT load.
+THROTTLE_RETRY_CONFIG = Config(retries={"max_attempts": 10, "mode": "adaptive"})
 
 
 def download_greengrass_lite(commit_id: str) -> bool:
@@ -87,7 +92,7 @@ def setup_greengrass_lite(commit_id: str, region: str):
     os.chdir(ggl_path)
 
     # Set up an iot client
-    iot_client = client("iot", region_name=region)
+    iot_client = client("iot", region_name=region, config=THROTTLE_RETRY_CONFIG)
 
     try:
 
@@ -175,7 +180,7 @@ def setup_greengrass_lite(commit_id: str, region: str):
             raise Exception(
                 f"FATAL: Could not read thing name from config: {e}")
 
-        gg_client = boto3.client('greengrassv2')
+        gg_client = boto3.client('greengrassv2', config=THROTTLE_RETRY_CONFIG)
 
         for attempt in range(30):    # Wait up to 5 minutes
             try:

@@ -21,6 +21,8 @@ class IoTUtils():
         self._thing_groups = []
         self._provisioned_role_name = None
         self._provisioned_role_alias = None
+        self._provisioned_role_name = None
+        self._provisioned_role_alias = None
 
     @property
     def thing_name(self):
@@ -34,6 +36,10 @@ class IoTUtils():
             endpointType="iot:CredentialProvider")["endpointAddress"]
         return {"iotDataEndpoint": data_ep, "iotCredEndpoint": cred_ep}
 
+    def provision_for_endpoint_switch(self,
+                                      cert_pem: str,
+                                      role_alias_name: str,
+                                      role_name: str = "ggl-uat-role"):
     def provision_for_endpoint_switch(self,
                                       cert_pem: str,
                                       role_alias_name: str,
@@ -97,6 +103,8 @@ class IoTUtils():
             return None
 
         # set up role and role alias
+        role_arn, _ = self._create_iot_role()
+        role_alias_arn, _ = self._create_role_alias(role_arn)
         role_arn, _ = self._create_iot_role()
         role_alias_arn, _ = self._create_role_alias(role_arn)
         self._attach_thing_policy(role_alias_arn, cert_arn)
@@ -297,9 +305,8 @@ class IoTUtils():
                 except Exception as e:
                     print(f"Could not delete role: {e}")
 
-            print("IoT clean-up completed.\n")
-
-            # Delete the JSON file
+        print("IoT clean-up completed.\n")
+                # Delete the JSON file
             try:
                 subprocess.run(['rm', '-rf', JSON_FILE], check=True)
             except Exception as e:
@@ -311,6 +318,9 @@ class IoTUtils():
     # ===============================================
     # HELPER FUNCTIONS
     # ===============================================
+    def _create_iot_role(self,
+                         role_name: str = "ggl-uat-role"
+                         ) -> tuple[str | None, bool]:
     def _create_iot_role(self,
                          role_name: str = "ggl-uat-role"
                          ) -> tuple[str | None, bool]:
@@ -336,6 +346,8 @@ class IoTUtils():
                     "logs:CreateLogGroup", "logs:CreateLogStream",
                     "logs:PutLogEvents", "logs:DescribeLogStreams",
                     "iot:DescribeEndpoint", "s3:*"
+                    "logs:PutLogEvents", "logs:DescribeLogStreams",
+                    "iot:DescribeEndpoint", "s3:*"
                 ],
                 "Resource":
                 "*"
@@ -343,10 +355,12 @@ class IoTUtils():
         }
 
         policy_name = f"{role_name}-token-exchange-policy"
+        policy_name = f"{role_name}-token-exchange-policy"
 
         try:
             role_response = self._iam_client.get_role(RoleName=role_name)
             print(f"Role '{role_name}' already exists.")
+            return (role_response['Role']['Arn'], False)
             return (role_response['Role']['Arn'], False)
 
         except self._iam_client.exceptions.NoSuchEntityException:
@@ -362,11 +376,17 @@ class IoTUtils():
                 RoleName=role_name, PolicyArn=policy_response['Policy']['Arn'])
 
             return (role_response['Role']['Arn'], True)
+            return (role_response['Role']['Arn'], True)
 
         except Exception as e:
             print(f"Error creating role: {str(e)}")
             return (None, False)
+            return (None, False)
 
+    def _create_role_alias(self,
+                           role_arn: str,
+                           role_alias_name: str = "ggl-uat-role-alias"
+                           ) -> tuple[str | None, bool]:
     def _create_role_alias(self,
                            role_arn: str,
                            role_alias_name: str = "ggl-uat-role-alias"
@@ -377,6 +397,7 @@ class IoTUtils():
                 roleAlias=role_alias_name)
             print(f"Role alias '{role_alias_name}' already exists.")
             return (response['roleAliasDescription']['roleAliasArn'], False)
+            return (response['roleAliasDescription']['roleAliasArn'], False)
 
         except self._iot_client.exceptions.ResourceNotFoundException:
             response = self._iot_client.create_role_alias(
@@ -385,9 +406,11 @@ class IoTUtils():
                 credentialDurationSeconds=3600)
 
             return (response['roleAliasArn'], True)
+            return (response['roleAliasArn'], True)
 
         except Exception as e:
             print(f"Error creating role alias: {str(e)}")
+            return (None, False)
             return (None, False)
 
     def _attach_thing_policy(self,
